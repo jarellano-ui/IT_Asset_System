@@ -116,14 +116,24 @@
     }
 
     function Dashboard() {
-      // Safe Hydration from Data Vaults
+      // Safe Hydration from Data Vaults & Session Storage (Persists on Refresh)
       const [rawData, setRawData] = useState(() => {
         const el = document.getElementById('data-raw');
-        return el && el.textContent.trim() ? JSON.parse(el.textContent) : [];
+        if (el && el.textContent.trim()) return JSON.parse(el.textContent);
+        try {
+          const saved = sessionStorage.getItem('itAssetData');
+          if (saved) return JSON.parse(saved);
+        } catch(e) {}
+        return [];
       });
       const [headers, setHeaders] = useState(() => {
         const el = document.getElementById('data-headers');
-        return el && el.textContent.trim() ? JSON.parse(el.textContent) : [];
+        if (el && el.textContent.trim()) return JSON.parse(el.textContent);
+        try {
+          const saved = sessionStorage.getItem('itAssetHeaders');
+          if (saved) return JSON.parse(saved);
+        } catch(e) {}
+        return [];
       });
       
       const [path, setPath] = useState([]); 
@@ -333,14 +343,40 @@
               const text = evt.target.result;
               const parsed = parseCSV(text);
               if (parsed.length > 1) {
-                setHeaders(parsed[0]);
-                setRawData(parsed.slice(1));
+                const newHeaders = parsed[0];
+                const newData = parsed.slice(1);
+                setHeaders(newHeaders);
+                setRawData(newData);
+                
+                // Cache data so refresh doesn't break
+                try {
+                  sessionStorage.setItem('itAssetHeaders', JSON.stringify(newHeaders));
+                  sessionStorage.setItem('itAssetData', JSON.stringify(newData));
+                } catch (err) {
+                  console.warn("File too large for session storage. Data won't persist on refresh.");
+                }
               }
             } catch (err) {
               alert("Failed to parse CSV file. Ensure it is a valid Snipe-IT export.");
             }
           };
           reader.readAsText(file);
+        }
+      };
+
+      const handleReset = () => {
+        if (window.confirm("Are you sure you want to upload a new file? The current view will be cleared.")) {
+          setRawData([]);
+          setHeaders([]);
+          setPath([]);
+          setSelectedStatus(null);
+          setExpandedAssigned(false);
+          setInventorySearch('');
+          setInventoryStatusFilter('ALL');
+          try {
+            sessionStorage.removeItem('itAssetData');
+            sessionStorage.removeItem('itAssetHeaders');
+          } catch(e) {}
         }
       };
 
@@ -517,6 +553,11 @@
                   {availableLocations.map(loc => (<option key={loc} value={loc}>{loc}</option>))}
                 </select>
               </div>
+
+              <button onClick={handleReset} className="flex items-center gap-2 bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 px-4 py-2 rounded-lg font-medium transition-colors shadow-sm shrink-0">
+                <Upload size={18} />
+                <span className="hidden sm:inline">Upload New File</span>
+              </button>
 
               {!window.__IS_EXPORTED_SNAPSHOT__ && (
                 <button onClick={triggerExport} className="flex items-center gap-2 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 px-4 py-2 rounded-lg font-medium transition-colors shadow-sm shrink-0">
