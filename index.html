@@ -934,34 +934,34 @@
             {/* ---------------- REPORTS TAB VIEW ---------------- */}
             {activeTab === 'reports' ? (
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in duration-300">
-                <div className="bg-[#0B1E4A] px-6 py-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div className="bg-[#5C6B42] px-6 py-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                   <h2 className="text-white font-semibold text-lg flex items-center gap-2 shrink-0">
                     <FileText size={20} className="text-blue-400"/> Reports Dashboard
                   </h2>
                   <div className="flex flex-wrap items-center gap-3">
-                    <div className="flex flex-wrap items-center gap-2 bg-white/10 p-1.5 rounded-lg border border-white/20">
+                    <div className="flex flex-wrap items-center gap-2">
                       <select 
                         value={reportDateType} 
                         onChange={e=>setReportDateType(e.target.value)} 
-                        className="bg-transparent text-white text-sm font-bold uppercase tracking-wider outline-none cursor-pointer"
+                        className="bg-white text-slate-800 text-sm font-bold outline-none cursor-pointer px-4 py-2.5 rounded-xl shadow-sm transition-all focus:ring-2 focus:ring-emerald-500"
                       >
-                        <option value="ALL_TIME" className="text-slate-800">All Assets (Up to Date)</option>
-                        <option value="PURCHASE_DATE" className="text-slate-800">By Date Acquired</option>
-                        <option value="CHECK_IN" className="text-slate-800">By Check-In Date</option>
-                        <option value="CHECK_OUT" className="text-slate-800">By Check-Out Date</option>
-                        <option value="EOL" className="text-slate-800">By EOL Date</option>
+                        <option value="ALL_TIME" className="font-bold">All Assets (Up to Date)</option>
+                        <option value="PURCHASE_DATE" className="font-bold">By Date Acquired</option>
+                        <option value="CHECK_IN" className="font-bold">By Check-In Date</option>
+                        <option value="CHECK_OUT" className="font-bold">By Check-Out Date</option>
+                        <option value="EOL" className="font-bold">By EOL Date</option>
                       </select>
 
                       {reportDateType !== 'ALL_TIME' && (
-                        <React.Fragment>
-                          <input type="date" value={reportStart} onChange={e=>setReportStart(e.target.value)} className="bg-white text-slate-800 text-sm px-2 py-1 rounded outline-none"/>
-                          <span className="text-slate-400 text-sm">to</span>
-                          <input type="date" value={reportEnd} onChange={e=>setReportEnd(e.target.value)} className="bg-white text-slate-800 text-sm px-2 py-1 rounded outline-none"/>
-                        </React.Fragment>
+                        <div className="flex items-center gap-2 bg-white/20 px-3 py-2 rounded-xl border border-white/30 shadow-sm">
+                          <input type="date" value={reportStart} onChange={e=>setReportStart(e.target.value)} className="bg-white text-slate-800 text-sm px-2 py-0.5 rounded outline-none font-bold"/>
+                          <span className="text-white font-bold text-xs tracking-wider">TO</span>
+                          <input type="date" value={reportEnd} onChange={e=>setReportEnd(e.target.value)} className="bg-white text-slate-800 text-sm px-2 py-0.5 rounded outline-none font-bold"/>
+                        </div>
                       )}
                     </div>
-                    <button onClick={exportReportsExcel} className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-sm flex items-center gap-2 text-sm shrink-0">
-                      <Download size={16} /> Download Excel Report
+                    <button onClick={exportReportsExcel} className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2.5 rounded-xl font-bold transition-colors shadow-sm flex items-center gap-2 text-sm shrink-0">
+                      <Download size={18} /> Download Excel Report
                     </button>
                   </div>
                 </div>
@@ -972,7 +972,7 @@
                     {/* Metric Table */}
                     <div className="border border-slate-200 rounded-lg overflow-hidden">
                       <table className="w-full text-sm text-left">
-                        <thead className="bg-[#0f2858] text-white">
+                        <thead className="bg-[#5C6B42] text-white">
                           <tr><th className="px-4 py-2">Metric</th><th className="px-4 py-2 text-right">Value</th></tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 bg-white">
@@ -987,7 +987,7 @@
                     {/* Location Table */}
                     <div className="border border-slate-200 rounded-lg overflow-hidden h-full max-h-64 overflow-y-auto">
                       <table className="w-full text-sm text-left relative">
-                        <thead className="bg-[#0f2858] text-white sticky top-0">
+                        <thead className="bg-[#5C6B42] text-white sticky top-0">
                           <tr><th className="px-4 py-2">Default Location</th><th className="px-4 py-2 text-right">Count</th></tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 bg-white">
@@ -1008,7 +1008,7 @@
                     <h3 className="font-bold text-slate-800 text-lg mb-3">Category Summary</h3>
                     <div className="border border-slate-200 rounded-lg overflow-x-auto shadow-sm max-h-96 overflow-y-auto">
                       <table className="w-full text-sm text-left whitespace-nowrap relative">
-                        <thead className="bg-[#0f2858] text-white text-xs sticky top-0 z-10">
+                        <thead className="bg-[#5C6B42] text-white text-xs sticky top-0 z-10">
                           <tr>
                             <th className="px-4 py-3">Category</th>
                             <th className="px-4 py-3 text-right">Count</th>
@@ -1050,7 +1050,7 @@
                     <h3 className="font-bold text-slate-800 text-lg mb-3">Model Summary</h3>
                     <div className="border border-slate-200 rounded-lg overflow-x-auto shadow-sm max-h-96 overflow-y-auto">
                       <table className="w-full text-sm text-left whitespace-nowrap relative">
-                        <thead className="bg-[#0f2858] text-white text-xs sticky top-0 z-10">
+                        <thead className="bg-[#5C6B42] text-white text-xs sticky top-0 z-10">
                           <tr>
                             <th className="px-4 py-3">Category</th>
                             <th className="px-4 py-3">Model</th>
@@ -1116,13 +1116,13 @@
                           <ChevronRight size={20} className={"text-blue-400 mt-1 transition-transform shrink-0 " + (expandedAssigned ? "rotate-90" : "")} />
                         </div>
                         <div className="mt-auto pt-3 text-[11px] w-full flex flex-col gap-1">
-                          <div className="flex justify-between items-center px-2 py-1 bg-[#C3D48D]/20 border border-[#C3D48D] rounded transition-colors hover:bg-[#C3D48D]/40">
-                            <span className="flex items-center gap-1 font-semibold text-[#5a6b28]"><ShieldCheck size={12}/> Covered</span> 
+                          <div className="flex justify-between items-center px-2 py-1 bg-[#7F915D]/10 border border-[#7F915D]/40 rounded transition-colors hover:bg-[#7F915D]/20">
+                            <span className="flex items-center gap-1 font-semibold text-[#5c6b42]"><ShieldCheck size={12}/> Covered</span> 
                             <strong className="text-[#3b4718]">{stats["ASSIGNED_TOTAL_covered"]}</strong>
                           </div>
-                          <div className="flex justify-between items-center px-2 py-1 bg-[#FF9A9E]/20 border border-[#FF9A9E] rounded transition-colors hover:bg-[#FF9A9E]/40">
-                            <span className="flex items-center gap-1 font-semibold text-[#b82d33]"><ShieldAlert size={12}/> Out of Wty</span> 
-                            <strong className="text-[#8c1e23]">{stats["ASSIGNED_TOTAL"] - stats["ASSIGNED_TOTAL_covered"]}</strong>
+                          <div className="flex justify-between items-center px-2 py-1 bg-[#DE393F]/10 border border-[#DE393F]/40 rounded transition-colors hover:bg-[#DE393F]/20">
+                            <span className="flex items-center gap-1 font-semibold text-[#a8242a]"><ShieldAlert size={12}/> Out of Wty</span> 
+                            <strong className="text-[#801419]">{stats["ASSIGNED_TOTAL"] - stats["ASSIGNED_TOTAL_covered"]}</strong>
                           </div>
                         </div>
                       </button>
@@ -1157,13 +1157,13 @@
                         </div>
                         <span className={"text-2xl font-bold leading-none mt-1 " + colorClasses.textDark}>{stats[statConfig.key]}</span>
                         <div className="mt-auto pt-3 text-[11px] w-full flex flex-col gap-1">
-                          <div className="flex justify-between items-center px-2 py-1 bg-[#C3D48D]/20 border border-[#C3D48D] rounded transition-colors hover:bg-[#C3D48D]/40">
-                            <span className="flex items-center gap-1 font-semibold text-[#5a6b28]"><ShieldCheck size={12}/> Covered</span> 
+                          <div className="flex justify-between items-center px-2 py-1 bg-[#7F915D]/10 border border-[#7F915D]/40 rounded transition-colors hover:bg-[#7F915D]/20">
+                            <span className="flex items-center gap-1 font-semibold text-[#5c6b42]"><ShieldCheck size={12}/> Covered</span> 
                             <strong className="text-[#3b4718]">{stats[statConfig.key + "_covered"]}</strong>
                           </div>
-                          <div className="flex justify-between items-center px-2 py-1 bg-[#FF9A9E]/20 border border-[#FF9A9E] rounded transition-colors hover:bg-[#FF9A9E]/40">
-                            <span className="flex items-center gap-1 font-semibold text-[#b82d33]"><ShieldAlert size={12}/> Out of Wty</span> 
-                            <strong className="text-[#8c1e23]">{stats[statConfig.key] - stats[statConfig.key + "_covered"]}</strong>
+                          <div className="flex justify-between items-center px-2 py-1 bg-[#DE393F]/10 border border-[#DE393F]/40 rounded transition-colors hover:bg-[#DE393F]/20">
+                            <span className="flex items-center gap-1 font-semibold text-[#a8242a]"><ShieldAlert size={12}/> Out of Wty</span> 
+                            <strong className="text-[#801419]">{stats[statConfig.key] - stats[statConfig.key + "_covered"]}</strong>
                           </div>
                         </div>
                       </button>
