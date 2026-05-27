@@ -7,6 +7,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.6/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 </head>
 <body class="bg-slate-50 text-slate-800 font-sans">
   <div id="root">
@@ -22,6 +23,15 @@
   <!-- Main Application Source -->
   <script type="text/babel" data-presets="react,env" id="app-source">
     const { useState, useMemo, useCallback, useEffect } = React;
+
+    const CATEGORY_ORDER = {
+      'Desktop': 1,
+      'Laptop': 2,
+      'Monitor': 3,
+      'Headsets': 4,
+      'Headset Adapter': 5,
+      'Accessories & Others': 6
+    };
 
     // --- FULLY OFFLINE INLINE SVGS ---
     const SvgIcon = ({ children, size = 24, className = "" }) => (
@@ -45,6 +55,8 @@
     const Activity = (p) => <SvgIcon {...p}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></SvgIcon>;
     const Search = (p) => <SvgIcon {...p}><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/></SvgIcon>;
     const MapPin = (p) => <SvgIcon {...p}><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></SvgIcon>;
+    const LayoutDashboard = (p) => <SvgIcon {...p}><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></SvgIcon>;
+    const FileText = (p) => <SvgIcon {...p}><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><line x1="10" x2="8" y1="9" y2="9"/></SvgIcon>;
 
     // --- ROBUST CSV PARSER ---
     const parseCSV = (str) => {
@@ -136,6 +148,7 @@
         return [];
       });
       
+      const [activeTab, setActiveTab] = useState('dashboard');
       const [path, setPath] = useState([]); 
       const [selectedStatus, setSelectedStatus] = useState(null); 
       const [expandedAssigned, setExpandedAssigned] = useState(false);
@@ -143,7 +156,14 @@
       const [inventoryStatusFilter, setInventoryStatusFilter] = useState('ALL');
       const [selectedLocation, setSelectedLocation] = useState('ALL'); 
 
-      const TODAY = new Date('2026-05-21'); 
+      // Reports Filter States
+      const TODAY = new Date('2026-05-27'); 
+      const [reportDateType, setReportDateType] = useState('ALL_TIME');
+      const [reportStart, setReportStart] = useState('2026-01-01');
+      const [reportEnd, setReportEnd] = useState(TODAY.toISOString().split('T')[0]);
+
+      const [reportDrilldown, setReportDrilldown] = useState(null);
+      const [reportDrilldownSearch, setReportDrilldownSearch] = useState('');
 
       const enrichedData = useMemo(() => {
         if (!rawData || rawData.length === 0) return [];
@@ -156,41 +176,53 @@
           const warrantyText = String(row[12] || '').toUpperCase();
           const rawStatusStr = String(row[46] || '').toUpperCase();
 
-          let mainCat = 'Unknown';
+          const looksLikeMonitor = modelStr.includes('MONITOR') || modelStr.includes('E2219HN');
+          const isMonitor = categoryCol.includes('MONITOR') || looksLikeMonitor;
+          
+          const isAdapter = (categoryCol.includes('HEADSET') && categoryCol.includes('ADAPTER')) || 
+                            (modelStr.includes('HEADSET') && modelStr.includes('ADAPTER')) || 
+                            (modelStr.includes('JABRA') && modelStr.includes('LINK'));
+                            
+          const looksLikeHeadset = /HEADSET|JABRA|BIZ|ADDASOUND|EVOLVE|EPIC/.test(modelStr);
+          const isHeadset = !isAdapter && (categoryCol.includes('HEADSET') || looksLikeHeadset);
+          
+          const looksLikeComputer = /MACBOOK|OPTIPLEX|THINKPAD|LATITUDE|PROBOOK|VOSTRO|NITRO|HELIOS|TRAVELMATE/.test(modelStr);
+          const isComputer = categoryCol.includes('LAPTOP') || categoryCol.includes('DESKTOP') || categoryCol.includes('COMPUTER') || categoryCol.includes('MAC') || looksLikeComputer;
+
+          let mainCat = 'Accessories & Others';
           let subCat = 'Unknown';
           let type = 'Unknown';
           let matchedModel = row[4] || 'Unknown Model';
 
-          const isMonitor = categoryCol.includes('MONITOR');
-          const isHeadset = categoryCol.includes('HEADSET');
-          const isComputer = categoryCol.includes('LAPTOP') || categoryCol.includes('DESKTOP') || categoryCol.includes('COMPUTER') || categoryCol.includes('MAC');
-          
-          const looksLikeMonitor = modelStr.includes('MONITOR') || modelStr.includes('E2219HN');
-          const looksLikeHeadset = /HEADSET|JABRA|BIZ|ADDASOUND|EVOLVE|EPIC/.test(modelStr);
-          const looksLikeComputer = /MACBOOK|OPTIPLEX|THINKPAD|LATITUDE|PROBOOK|VOSTRO|NITRO|HELIOS|TRAVELMATE/.test(modelStr);
-
-          if (isMonitor || (!isHeadset && !isComputer && looksLikeMonitor)) {
+          if (isComputer) {
+            if (categoryCol.includes('DESKTOP') || modelStr.includes('OPTIPLEX') || modelStr.includes('DESKTOP') || modelStr.includes('MICRO')) {
+              mainCat = 'Desktop';
+              subCat = 'Windows';
+              type = 'Desktop';
+            } else {
+              mainCat = 'Laptop';
+              if (categoryCol.includes('MAC') || modelStr.includes('MACBOOK') || modelStr.includes('MAC')) {
+                subCat = 'MacOS';
+                type = 'MacBook';
+              } else {
+                subCat = 'Windows';
+                type = 'Laptop';
+              }
+            }
+          } else if (isMonitor) {
             mainCat = 'Monitor';
             subCat = 'Monitor';
             if (modelStr.includes('24')) type = '24-inch';
             else if (modelStr.includes('22') || modelStr.includes('E2219HN')) type = '22-inch';
             else type = 'Others';
-          } else if (isHeadset || (!isMonitor && !isComputer && looksLikeHeadset)) {
-            mainCat = 'Headset';
+          } else if (isAdapter) {
+            mainCat = 'Headset Adapter';
+            subCat = 'Adapter';
+            type = 'USB';
+          } else if (isHeadset) {
+            mainCat = 'Headsets';
             subCat = 'Headset';
             type = modelStr.includes('USB-C') ? 'USB-C' : 'USB-A';
-          } else if (isComputer || (!isMonitor && !isHeadset && looksLikeComputer)) {
-            mainCat = 'Computer';
-            if (categoryCol.includes('MAC') || modelStr.includes('MACBOOK') || modelStr.includes('MAC')) {
-              subCat = 'MacOS';
-              type = 'MacBook';
-            } else if (categoryCol.includes('DESKTOP') || modelStr.includes('OPTIPLEX') || modelStr.includes('DESKTOP') || modelStr.includes('MICRO')) {
-              subCat = 'Windows';
-              type = 'Desktop';
-            } else {
-              subCat = 'Windows';
-              type = 'Laptop';
-            }
           } else {
             mainCat = 'Accessories & Others';
             subCat = categoryCol ? (categoryCol.charAt(0) + categoryCol.slice(1).toLowerCase()) : 'Uncategorized';
@@ -224,6 +256,17 @@
             }
           }
 
+          // DYNAMIC WARRANTY LOGIC
+          let warrantyLimit = 1;
+          const isMeetingEq = categoryCol.includes('MEETING') || categoryCol.includes('CHROMEBOOK') || modelStr.includes('CHROMEBOOK');
+          const isHeadsetOrAdapterCheck = mainCat === 'Headsets' || mainCat === 'Headset Adapter';
+
+          if (mainCat === 'Desktop' || mainCat === 'Laptop' || mainCat === 'Monitor' || isMeetingEq) {
+            warrantyLimit = 3;
+          } else if (isHeadsetOrAdapterCheck) {
+            warrantyLimit = 2;
+          }
+
           let isCovered = false;
           let ageInYears = 0;
           let isVoidedByDamage = rawStatusStr.includes('BROKEN');
@@ -236,7 +279,7 @@
               if (warrantyText === 'VOID' || isVoidedByDamage) {
                 isCovered = false;
               } else {
-                isCovered = ageInYears < 3;
+                isCovered = ageInYears < warrantyLimit;
               }
             }
           } else if (isVoidedByDamage) {
@@ -255,6 +298,9 @@
             damageStatus: damageStatus,
             isCovered: isCovered,
             isVoidedByDamage: isVoidedByDamage,
+            warrantyLimit: warrantyLimit,
+            rawCategory: categoryCol || 'Uncategorized',
+            purchaseDate: purchaseDateStr,
             originalRow: row
           };
         });
@@ -275,6 +321,52 @@
           return true;
         });
       }, [enrichedData, path, selectedLocation]);
+
+      // --- REPORTS TAB SPECIFIC FILTERING ---
+      const reportFilteredData = useMemo(() => {
+        if (reportDateType === 'ALL_TIME') return filteredData;
+
+        const checkinIdx = headers.findIndex(h => {
+          const lowerH = String(h || '').toLowerCase().trim();
+          return lowerH === 'last checkin date' || lowerH.includes('last checkin');
+        });
+        const checkoutIdx = headers.findIndex(h => {
+          const lowerH = String(h || '').toLowerCase().trim();
+          return lowerH === 'checkout date' || lowerH.includes('checkout');
+        });
+        const eolIdx = headers.findIndex(h => String(h || '').toLowerCase().includes('eol'));
+        const statusIdx = headers.findIndex(h => String(h || '').toLowerCase().trim() === 'status');
+
+        return filteredData.filter(item => {
+          let targetDateStr = null;
+          let isValidStatus = true;
+          
+          const rawStatusLower = String(item.originalRow[statusIdx > -1 ? statusIdx : 46] || '').toLowerCase(); 
+
+          if (reportDateType === 'PURCHASE_DATE') {
+            targetDateStr = item.purchaseDate;
+          } else if (reportDateType === 'CHECK_IN') {
+            targetDateStr = checkinIdx > -1 ? item.originalRow[checkinIdx] : null;
+            isValidStatus = rawStatusLower.includes('deployable');
+          } else if (reportDateType === 'CHECK_OUT') {
+            targetDateStr = checkoutIdx > -1 ? item.originalRow[checkoutIdx] : null;
+            isValidStatus = rawStatusLower.includes('deployed');
+          } else if (reportDateType === 'EOL') {
+            targetDateStr = eolIdx > -1 ? item.originalRow[eolIdx] : null;
+          }
+
+          if (!isValidStatus || !targetDateStr) return false;
+
+          const pDate = new Date(targetDateStr);
+          if (isNaN(pDate)) return false;
+          
+          const start = reportStart ? new Date(reportStart) : new Date('2000-01-01');
+          const end = reportEnd ? new Date(reportEnd) : new Date('2100-01-01');
+          end.setHours(23, 59, 59, 999); 
+          
+          return pDate >= start && pDate <= end;
+        });
+      }, [filteredData, reportDateType, reportStart, reportEnd, headers]);
 
       const stats = useMemo(() => {
         const counts = {
@@ -334,6 +426,113 @@
         });
       }, [filteredData, inventorySearch, inventoryStatusFilter]);
 
+      // --- REPORT GENERATION HELPERS ---
+      const generateReportSummary = useCallback((data, keySelector) => {
+        const map = {};
+        data.forEach(item => {
+          const key = keySelector(item) || 'Unknown';
+          if (!map[key]) {
+            map[key] = { count: 0, covered: 0, outOfWty: 0, assigned: 0, brokenDeployed: 0, readyAssign: 0, readyDispose: 0, evaluate: 0, repair: 0, lost: 0, serials: [], mainCategory: item.mainCategory };
+          }
+          map[key].count++;
+          const serial = String(item.originalRow[8] || '').trim() || 'N/A';
+          map[key].serials.push(serial);
+
+          if (item.isCovered) map[key].covered++; else map[key].outOfWty++;
+
+          const status = item.assignedSubStatus || item.primaryStatus;
+          if (status === 'ASSIGNED') map[key].assigned++;
+          if (status === 'BROKEN (DEPLOYED)') map[key].brokenDeployed++;
+          if (status === 'READY FOR ASSIGNMENT') map[key].readyAssign++;
+          if (status === 'READY FOR DISPOSAL') map[key].readyDispose++;
+          if (status === 'EVALUATE / INVESTIGATE') map[key].evaluate++;
+          if (status === 'OUT FOR REPAIR') map[key].repair++;
+          if (status === 'LOST OR STOLEN') map[key].lost++;
+        });
+        return Object.entries(map).map(([name, stats]) => ({ name, ...stats }));
+      }, []);
+
+      const reportMetrics = useMemo(() => {
+        return {
+          total: reportFilteredData.length,
+          uniqueModels: new Set(reportFilteredData.map(d => d.model)).size,
+          totalCategories: new Set(reportFilteredData.map(d => d.mainCategory)).size,
+          covered: reportFilteredData.filter(d => d.isCovered).length,
+          outOfWty: reportFilteredData.filter(d => !d.isCovered).length,
+        };
+      }, [reportFilteredData]);
+
+      const reportLocations = useMemo(() => {
+        const locs = {};
+        reportFilteredData.forEach(item => {
+          locs[item.location] = (locs[item.location] || 0) + 1;
+        });
+        return Object.entries(locs).map(([name, count]) => ({ name, count })).sort((a,b) => b.count - a.count);
+      }, [reportFilteredData]);
+
+      const reportCategories = useMemo(() => {
+        const res = generateReportSummary(reportFilteredData, i => i.mainCategory);
+        return res.sort((a, b) => (CATEGORY_ORDER[a.name] || 99) - (CATEGORY_ORDER[b.name] || 99));
+      }, [reportFilteredData, generateReportSummary]);
+
+      const reportModels = useMemo(() => {
+        const res = generateReportSummary(reportFilteredData, i => i.model);
+        return res.sort((a, b) => {
+          const catDiff = (CATEGORY_ORDER[a.mainCategory] || 99) - (CATEGORY_ORDER[b.mainCategory] || 99);
+          if (catDiff !== 0) return catDiff;
+          return b.count - a.count;
+        });
+      }, [reportFilteredData, generateReportSummary]);
+
+      // Dynamically hide empty columns for Check-In / Check-Out filters
+      const isCheckInOut = reportDateType === 'CHECK_IN' || reportDateType === 'CHECK_OUT';
+      const showAssigned = !isCheckInOut || reportCategories.some(c => c.assigned > 0);
+      const showBrokenDeployed = !isCheckInOut || reportCategories.some(c => c.brokenDeployed > 0);
+      const showReadyAssign = !isCheckInOut || reportCategories.some(c => c.readyAssign > 0);
+      const showReadyDispose = !isCheckInOut || reportCategories.some(c => c.readyDispose > 0);
+      const showEvaluate = !isCheckInOut || reportCategories.some(c => c.evaluate > 0);
+      const showRepair = !isCheckInOut || reportCategories.some(c => c.repair > 0);
+      const showLost = !isCheckInOut || reportCategories.some(c => c.lost > 0);
+
+      const handleReportCellClick = (type, rowName, columnType, label) => {
+        let filtered = reportFilteredData;
+
+        if (type === 'category') {
+          filtered = filtered.filter(d => d.mainCategory === rowName);
+        } else if (type === 'model') {
+          filtered = filtered.filter(d => d.model === rowName);
+        } else if (type === 'location') {
+          filtered = filtered.filter(d => d.location === rowName);
+        }
+
+        if (columnType === 'covered') filtered = filtered.filter(d => d.isCovered);
+        if (columnType === 'outOfWty') filtered = filtered.filter(d => !d.isCovered);
+        if (columnType === 'assigned') filtered = filtered.filter(d => (d.assignedSubStatus || d.primaryStatus) === 'ASSIGNED');
+        if (columnType === 'brokenDeployed') filtered = filtered.filter(d => (d.assignedSubStatus || d.primaryStatus) === 'BROKEN (DEPLOYED)');
+        if (columnType === 'readyAssign') filtered = filtered.filter(d => (d.assignedSubStatus || d.primaryStatus) === 'READY FOR ASSIGNMENT');
+        if (columnType === 'readyDispose') filtered = filtered.filter(d => (d.assignedSubStatus || d.primaryStatus) === 'READY FOR DISPOSAL');
+        if (columnType === 'evaluate') filtered = filtered.filter(d => (d.assignedSubStatus || d.primaryStatus) === 'EVALUATE / INVESTIGATE');
+        if (columnType === 'repair') filtered = filtered.filter(d => (d.assignedSubStatus || d.primaryStatus) === 'OUT FOR REPAIR');
+        if (columnType === 'lost') filtered = filtered.filter(d => (d.assignedSubStatus || d.primaryStatus) === 'LOST OR STOLEN');
+
+        setReportDrilldown({
+          title: `${rowName === 'ALL' ? 'Total Assets' : rowName} - ${label}`,
+          data: filtered
+        });
+        setReportDrilldownSearch('');
+      };
+
+      const renderCell = (val, onClick, className) => {
+        if (!val) return <td className={className}>0</td>;
+        return (
+          <td className={className}>
+            <button onClick={onClick} className="hover:underline hover:text-blue-600 transition-colors cursor-pointer focus:outline-none">
+              {val}
+            </button>
+          </td>
+        );
+      };
+
       const handleFileUpload = (e) => {
         const file = e.target.files[0];
         if (file) {
@@ -348,7 +547,6 @@
                 setHeaders(newHeaders);
                 setRawData(newData);
                 
-                // Cache data so refresh doesn't break
                 try {
                   sessionStorage.setItem('itAssetHeaders', JSON.stringify(newHeaders));
                   sessionStorage.setItem('itAssetData', JSON.stringify(newData));
@@ -373,6 +571,7 @@
           setExpandedAssigned(false);
           setInventorySearch('');
           setInventoryStatusFilter('ALL');
+          setActiveTab('dashboard');
           try {
             sessionStorage.removeItem('itAssetData');
             sessionStorage.removeItem('itAssetHeaders');
@@ -409,7 +608,7 @@
         setInventoryStatusFilter(statusFilter);
       };
 
-      // --- OFFLINE EXPORT LOGIC ---
+      // --- OFFLINE EXPORT LOGIC FOR DASHBOARD ---
       const triggerExport = () => {
         if (!filteredData.length) return;
         if (window.__IS_EXPORTED_SNAPSHOT__) {
@@ -431,6 +630,7 @@
           '  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"><' + '/script>',
           '  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"><' + '/script>',
           '  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.6/babel.min.js"><' + '/script>',
+          '  <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"><' + '/script>',
           '  <script>',
           '    window.__IS_EXPORTED_SNAPSHOT__ = true;',
           '  <' + '/script>',
@@ -460,6 +660,131 @@
         document.body.removeChild(link);
       };
 
+      // --- EXPORT EXCEL FOR REPORTS TAB ---
+      const exportReportsExcel = () => {
+        const headerStyle = {
+          font: { bold: true, color: { rgb: "FFFFFF" } },
+          fill: { fgColor: { rgb: "5C6B42" }, patternType: "solid" }
+        };
+
+        const createHeaderCell = (value) => ({ v: value, t: "s", s: headerStyle });
+        const summaryData = [];
+
+        // 1. Metrics
+        summaryData.push(['Metric', 'Value'].map(createHeaderCell));
+        summaryData.push(['Total Assets', reportMetrics.total]);
+        summaryData.push(['Models', reportMetrics.uniqueModels]);
+        summaryData.push(['Total Categories', reportMetrics.totalCategories]);
+        summaryData.push(['Assets (Covered by Warranty)', reportMetrics.covered]);
+        summaryData.push(['Assets (Out of Warranty)', reportMetrics.outOfWty]);
+        summaryData.push([]); 
+
+        // 2. Locations
+        summaryData.push([{v: 'Location Summary', s: { font: { bold: true, sz: 14 } }}]);
+        summaryData.push(['Default Location', 'Count'].map(createHeaderCell));
+        reportLocations.forEach(loc => {
+          summaryData.push([loc.name, loc.count]);
+        });
+        summaryData.push([]); 
+
+        // Setup Dynamic Headers
+        const dynamicHeaders = [];
+        if (showAssigned) dynamicHeaders.push('Assigned');
+        if (showBrokenDeployed) dynamicHeaders.push('Broken (Deployed)');
+        if (showReadyAssign) dynamicHeaders.push('Ready for Assignment');
+        if (showReadyDispose) dynamicHeaders.push('Ready for Disposal');
+        if (showEvaluate) dynamicHeaders.push('Evaluate / Investigate');
+        if (showRepair) dynamicHeaders.push('Out for Repair');
+        if (showLost) dynamicHeaders.push('Lost or Stolen');
+        
+        // 3. Category Summary
+        const catHeaders = ["Category", "Count", "Covered by Wty", "Out of Wty", ...dynamicHeaders];
+        summaryData.push([{v: 'Category Summary', s: { font: { bold: true, sz: 14 } }}]);
+        summaryData.push(catHeaders.map(createHeaderCell));
+        reportCategories.forEach(c => {
+          const row = [c.name, c.count, c.covered, c.outOfWty];
+          if (showAssigned) row.push(c.assigned);
+          if (showBrokenDeployed) row.push(c.brokenDeployed);
+          if (showReadyAssign) row.push(c.readyAssign);
+          if (showReadyDispose) row.push(c.readyDispose);
+          if (showEvaluate) row.push(c.evaluate);
+          if (showRepair) row.push(c.repair);
+          if (showLost) row.push(c.lost);
+          summaryData.push(row);
+        });
+        summaryData.push([]); 
+
+        // 4. Model Summary
+        const modHeaders = ["Category", "Model", "Count", "Covered by Wty", "Out of Wty", ...dynamicHeaders];
+        summaryData.push([{v: 'Model Summary', s: { font: { bold: true, sz: 14 } }}]);
+        summaryData.push(modHeaders.map(createHeaderCell));
+        reportModels.forEach(m => {
+          const row = [m.mainCategory, m.name, m.count, m.covered, m.outOfWty];
+          if (showAssigned) row.push(m.assigned);
+          if (showBrokenDeployed) row.push(m.brokenDeployed);
+          if (showReadyAssign) row.push(m.readyAssign);
+          if (showReadyDispose) row.push(m.readyDispose);
+          if (showEvaluate) row.push(m.evaluate);
+          if (showRepair) row.push(m.repair);
+          if (showLost) row.push(m.lost);
+          summaryData.push(row);
+        });
+
+        // 5. Build Asset Inventory Sheet Data (Tab 2)
+        const inventoryData = [];
+        inventoryData.push(["Serial Number", "Category", "Model", "Status", "Location", "Warranty", "Purchase Date"].map(createHeaderCell));
+        
+        // Sorting Logic for Asset Inventory Focus
+        const statusSortOrder = {
+          'READY FOR ASSIGNMENT': 1,
+          'READY FOR DISPOSAL': 2,
+          'BROKEN (DEPLOYABLE)': 3,
+          'BROKEN (DEPLOYED)': 4,
+          'EVALUATE / INVESTIGATE': 5,
+        };
+
+        const sortedInventory = [...reportFilteredData].sort((a, b) => {
+          const statA = a.assignedSubStatus || a.primaryStatus || '';
+          const statB = b.assignedSubStatus || b.primaryStatus || '';
+          const rankA = statusSortOrder[statA] || 99;
+          const rankB = statusSortOrder[statB] || 99;
+          
+          if (rankA !== rankB) return rankA - rankB;
+          
+          const catDiff = (CATEGORY_ORDER[a.mainCategory] || 99) - (CATEGORY_ORDER[b.mainCategory] || 99);
+          if (catDiff !== 0) return catDiff;
+          
+          return (a.model || '').localeCompare(b.model || '');
+        });
+
+        sortedInventory.forEach(item => {
+          inventoryData.push([
+            item.originalRow[8] || "N/A",
+            item.mainCategory || "N/A",
+            item.model || "N/A",
+            item.assignedSubStatus || item.primaryStatus || "N/A",
+            item.location || "N/A",
+            item.isCovered ? `Covered (${item.warrantyLimit}Y)` : `Out of Warranty (${item.warrantyLimit}Y)`,
+            item.purchaseDate || "N/A"
+          ]);
+        });
+
+        // 6. Generate Workbook using SheetJS
+        const wb = window.XLSX.utils.book_new();
+        const wsSummary = window.XLSX.utils.aoa_to_sheet(summaryData);
+        const wsInventory = window.XLSX.utils.aoa_to_sheet(inventoryData);
+
+        const wscols = [{wch: 25}, {wch: 25}, {wch: 15}, {wch: 15}, {wch: 15}, {wch: 20}, {wch: 15}];
+        wsSummary['!cols'] = wscols;
+        wsInventory['!cols'] = wscols;
+
+        window.XLSX.utils.book_append_sheet(wb, wsSummary, "Summary Dashboard");
+        window.XLSX.utils.book_append_sheet(wb, wsInventory, "Asset Inventory");
+
+        const fileName = `IT_Asset_Report_${reportDateType === 'ALL_TIME' ? 'All_Time' : reportStart + '_to_' + reportEnd}.xlsx`;
+        window.XLSX.writeFile(wb, fileName);
+      };
+
       const getNextLevelOptions = () => {
         const optionsMap = {}; const levelIndex = path.length; let keyGetter;
         if (levelIndex === 0) keyGetter = item => item.mainCategory;
@@ -472,15 +797,22 @@
           const key = keyGetter(item);
           if (key && key !== 'Unknown') { optionsMap[key] = (optionsMap[key] || 0) + 1; }
         });
-        return Object.entries(optionsMap).sort((a, b) => b[1] - a[1]);
+        
+        const entries = Object.entries(optionsMap);
+        if (levelIndex === 0) {
+          entries.sort((a, b) => (CATEGORY_ORDER[a[0]] || 99) - (CATEGORY_ORDER[b[0]] || 99));
+        } else {
+          entries.sort((a, b) => b[1] - a[1]);
+        }
+        return entries;
       };
 
       const getIconForCategory = (name, parentCategory = null, iconSize = 32) => {
-        const n = String(name || '').toUpperCase(); const p = String(parentCategory || '').toUpperCase();
-        if (n.includes('COMPUTER') || n.includes('MACBOOK') || n.includes('LAPTOP') || (p.includes('COMPUTER') && !n.includes('DESKTOP') && !n.includes('WINDOWS'))) return <Laptop size={iconSize} className="text-blue-500" />;
-        if (n.includes('DESKTOP') || n.includes('WINDOWS')) return <HardDrive size={iconSize} className="text-indigo-500" />;
-        if (n.includes('HEADSET') || p.includes('HEADSET')) return <Headphones size={iconSize} className="text-pink-500" />;
-        if (n.includes('MONITOR') || p.includes('MONITOR')) return <Monitor size={iconSize} className="text-teal-500" />;
+        const n = String(name || '').toUpperCase(); 
+        if (n === 'LAPTOP' || n === 'MACBOOK' || n.includes('LAPTOP')) return <Laptop size={iconSize} className="text-blue-500" />;
+        if (n === 'DESKTOP' || n.includes('DESKTOP')) return <HardDrive size={iconSize} className="text-indigo-500" />;
+        if (n === 'HEADSETS' || n.includes('HEADSET')) return <Headphones size={iconSize} className="text-pink-500" />;
+        if (n === 'MONITOR' || n.includes('MONITOR')) return <Monitor size={iconSize} className="text-teal-500" />;
         return <ChevronRight size={iconSize} className="text-gray-400" />;
       };
 
@@ -516,36 +848,63 @@
             </div>
           )}
 
+          {/* TOP HEADER */}
           <header className="bg-white border-b border-slate-200 px-6 py-4 flex flex-col md:flex-row items-start md:items-center justify-between sticky top-0 z-10 gap-4">
-            <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap scrollbar-hide w-full md:w-auto">
-              <button onClick={() => navigateUp(0)} className="text-slate-500 hover:text-blue-600 font-semibold flex items-center gap-1 transition-colors">
-                Home
-              </button>
+            
+            {/* TABS & BREADCRUMBS */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full md:w-auto">
               
-              {inventoryStatusFilter !== 'ALL' && (
-                <React.Fragment>
-                  <ChevronRight size={16} className="text-slate-400 shrink-0" />
-                  <button 
-                    onClick={() => setInventoryStatusFilter('ALL')} 
-                    className="font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md flex items-center gap-1 border border-blue-200 hover:bg-red-50 hover:text-red-700 hover:border-red-200 transition-colors shadow-sm"
-                    title="Clear Status Filter"
-                  >
-                     {inventoryStatusFilter} <span className="text-lg leading-none">&times;</span>
-                  </button>
-                </React.Fragment>
-              )}
+              {/* Custom Tab Switcher */}
+              <div className="flex bg-slate-100 p-1 rounded-lg shrink-0">
+                <button 
+                  className={`px-4 py-1.5 rounded-md text-sm font-bold transition-colors flex items-center gap-1 ${activeTab==='dashboard' ? 'bg-white shadow text-blue-700' : 'text-slate-500 hover:text-slate-700'}`} 
+                  onClick={() => setActiveTab('dashboard')}
+                >
+                  <LayoutDashboard size={16}/> Dashboard
+                </button>
+                <button 
+                  className={`px-4 py-1.5 rounded-md text-sm font-bold transition-colors flex items-center gap-1 ${activeTab==='reports' ? 'bg-white shadow text-blue-700' : 'text-slate-500 hover:text-slate-700'}`} 
+                  onClick={() => setActiveTab('reports')}
+                >
+                  <FileText size={16}/> Reports
+                </button>
+              </div>
 
-              {path.map((segment, idx) => (
-                <React.Fragment key={idx}>
-                  <ChevronRight size={16} className="text-slate-400 shrink-0" />
-                  <button onClick={() => navigateUp(idx + 1)} className={"font-semibold transition-colors " + (idx === path.length - 1 ? "text-blue-700" : "text-slate-500 hover:text-blue-600")}>
-                    {segment}
+              {/* Breadcrumbs (Only show in Dashboard view) */}
+              {activeTab === 'dashboard' && (
+                <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap scrollbar-hide">
+                  <ChevronRight size={16} className="text-slate-300 shrink-0" />
+                  <button onClick={() => navigateUp(0)} className="text-slate-500 hover:text-blue-600 font-semibold flex items-center gap-1 transition-colors">
+                    Home
                   </button>
-                </React.Fragment>
-              ))}
+                  
+                  {inventoryStatusFilter !== 'ALL' && (
+                    <React.Fragment>
+                      <ChevronRight size={16} className="text-slate-400 shrink-0" />
+                      <button 
+                        onClick={() => setInventoryStatusFilter('ALL')} 
+                        className="font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md flex items-center gap-1 border border-blue-200 hover:bg-red-50 hover:text-red-700 hover:border-red-200 transition-colors shadow-sm"
+                        title="Clear Status Filter"
+                      >
+                         {inventoryStatusFilter} <span className="text-lg leading-none">&times;</span>
+                      </button>
+                    </React.Fragment>
+                  )}
+
+                  {path.map((segment, idx) => (
+                    <React.Fragment key={idx}>
+                      <ChevronRight size={16} className="text-slate-400 shrink-0" />
+                      <button onClick={() => navigateUp(idx + 1)} className={"font-semibold transition-colors " + (idx === path.length - 1 ? "text-blue-700" : "text-slate-500 hover:text-blue-600")}>
+                        {segment}
+                      </button>
+                    </React.Fragment>
+                  ))}
+                </div>
+              )}
             </div>
             
-            <div className="flex items-center gap-3 w-full md:w-auto overflow-x-auto">
+            {/* RIGHT HEADER ACTIONS */}
+            <div className="flex items-center gap-3 w-full md:w-auto overflow-x-auto justify-end">
               <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 shrink-0">
                 <MapPin size={16} className="text-slate-400" />
                 <select value={selectedLocation} onChange={(e) => setSelectedLocation(e.target.value)} className="bg-transparent text-sm font-medium text-slate-700 focus:outline-none cursor-pointer max-w-[200px]">
@@ -554,168 +913,338 @@
                 </select>
               </div>
 
-              <button onClick={handleReset} className="flex items-center gap-2 bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 px-4 py-2 rounded-lg font-medium transition-colors shadow-sm shrink-0">
-                <Upload size={18} />
-                <span className="hidden sm:inline">Upload New File</span>
-              </button>
+              {!window.__IS_EXPORTED_SNAPSHOT__ && (
+                <button onClick={handleReset} className="flex items-center gap-2 bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 px-4 py-2 rounded-lg font-medium transition-colors shadow-sm shrink-0">
+                  <Upload size={18} />
+                  <span className="hidden lg:inline">Upload New File</span>
+                </button>
+              )}
 
               {!window.__IS_EXPORTED_SNAPSHOT__ && (
                 <button onClick={triggerExport} className="flex items-center gap-2 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 px-4 py-2 rounded-lg font-medium transition-colors shadow-sm shrink-0">
                   <Download size={18} />
-                  <span className="hidden sm:inline">Export Interactive System</span>
+                  <span className="hidden lg:inline">Export Interactive System</span>
                 </button>
               )}
             </div>
           </header>
 
           <main className="max-w-7xl mx-auto p-6 space-y-6">
-            <section className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-              <div className="bg-slate-800 px-6 py-4 flex items-center justify-between">
-                <h2 className="text-white font-semibold text-lg flex items-center gap-2">
-                  <Activity size={20} className="text-blue-400"/> Current View Status
-                </h2>
-                <div className="bg-white/10 px-4 py-1 rounded-full text-white font-mono text-sm border border-white/20">
-                  Total Count: {stats.total}
-                </div>
-              </div>
-              <div className="p-6">
-                <div className="flex flex-wrap gap-4">
-                  <div className="flex-1 min-w-[160px] flex flex-col gap-2">
-                    <button onClick={() => setExpandedAssigned(!expandedAssigned)} className={"flex flex-col items-start px-4 py-3 rounded-lg border-2 transition-all w-full " + (expandedAssigned ? "bg-blue-50 border-blue-400 shadow-inner" : "bg-white border-blue-200 hover:border-blue-400 shadow-sm")}>
-                      <div className="flex justify-between items-start w-full">
-                        <div className="flex flex-col text-left">
-                          <span className="text-xs font-bold text-blue-500 tracking-wider uppercase">Assigned</span>
-                          <span className="text-2xl font-bold text-blue-900 leading-none mt-1">{stats["ASSIGNED_TOTAL"]}</span>
-                        </div>
-                        <ChevronRight size={20} className={"text-blue-400 mt-1 transition-transform " + (expandedAssigned ? "rotate-90" : "")} />
-                      </div>
-                      <div className="mt-3 text-[11px] w-full flex flex-col gap-1">
-                        <div className="flex justify-between items-center px-2 py-1 bg-emerald-50 text-emerald-700 rounded border border-emerald-100 hover:bg-emerald-100 transition-colors">
-                          <span className="flex items-center gap-1"><ShieldCheck size={12}/> Covered</span> 
-                          <strong className="text-emerald-800">{stats["ASSIGNED_TOTAL_covered"]}</strong>
-                        </div>
-                        <div className="flex justify-between items-center px-2 py-1 bg-red-50 text-red-700 rounded border border-red-100 hover:bg-red-100 transition-colors">
-                          <span className="flex items-center gap-1"><ShieldAlert size={12}/> Out of Wty</span> 
-                          <strong className="text-red-800">{stats["ASSIGNED_TOTAL"] - stats["ASSIGNED_TOTAL_covered"]}</strong>
-                        </div>
-                      </div>
+            
+            {/* ---------------- REPORTS TAB VIEW ---------------- */}
+            {activeTab === 'reports' ? (
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in duration-300">
+                <div className="bg-[#0B1E4A] px-6 py-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                  <h2 className="text-white font-semibold text-lg flex items-center gap-2 shrink-0">
+                    <FileText size={20} className="text-blue-400"/> Reports Dashboard
+                  </h2>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-2 bg-white/10 p-1.5 rounded-lg border border-white/20">
+                      <select 
+                        value={reportDateType} 
+                        onChange={e=>setReportDateType(e.target.value)} 
+                        className="bg-transparent text-white text-sm font-bold uppercase tracking-wider outline-none cursor-pointer"
+                      >
+                        <option value="ALL_TIME" className="text-slate-800">All Assets (Up to Date)</option>
+                        <option value="PURCHASE_DATE" className="text-slate-800">By Date Acquired</option>
+                        <option value="CHECK_IN" className="text-slate-800">By Check-In Date</option>
+                        <option value="CHECK_OUT" className="text-slate-800">By Check-Out Date</option>
+                        <option value="EOL" className="text-slate-800">By EOL Date</option>
+                      </select>
+
+                      {reportDateType !== 'ALL_TIME' && (
+                        <React.Fragment>
+                          <input type="date" value={reportStart} onChange={e=>setReportStart(e.target.value)} className="bg-white text-slate-800 text-sm px-2 py-1 rounded outline-none"/>
+                          <span className="text-slate-400 text-sm">to</span>
+                          <input type="date" value={reportEnd} onChange={e=>setReportEnd(e.target.value)} className="bg-white text-slate-800 text-sm px-2 py-1 rounded outline-none"/>
+                        </React.Fragment>
+                      )}
+                    </div>
+                    <button onClick={exportReportsExcel} className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-sm flex items-center gap-2 text-sm shrink-0">
+                      <Download size={16} /> Download Excel Report
                     </button>
-                    {expandedAssigned && (
-                      <div className="flex flex-col gap-2 mt-1 animate-in fade-in slide-in-from-top-2">
-                        <button onClick={() => setSelectedStatus("ASSIGNED_CLEAN")} className="bg-blue-100 hover:bg-blue-200 text-blue-800 px-3 py-2 rounded shadow-sm transition-colors text-left flex justify-between items-center">
-                          <span className="text-xs font-bold">ASSIGNED</span>
-                          <span className="text-sm font-bold bg-white/50 px-2 py-0.5 rounded">{stats["ASSIGNED_CLEAN"]}</span>
-                        </button>
-                        <button onClick={() => setSelectedStatus("ASSIGNED_BROKEN")} className="bg-purple-100 hover:bg-purple-200 text-purple-800 px-3 py-2 rounded shadow-sm transition-colors text-left flex justify-between items-center">
-                          <span className="text-xs font-bold leading-tight">BROKEN<br/>(DEPLOYED)</span>
-                          <span className="text-sm font-bold bg-white/50 px-2 py-0.5 rounded">{stats["ASSIGNED_BROKEN"]}</span>
-                        </button>
-                      </div>
-                    )}
+                  </div>
+                </div>
+
+                <div className="p-6 space-y-8">
+                  {/* Metric Summary & Location Summary Grid */}
+                  <div className="grid md:grid-cols-2 gap-6">
+                    {/* Metric Table */}
+                    <div className="border border-slate-200 rounded-lg overflow-hidden">
+                      <table className="w-full text-sm text-left">
+                        <thead className="bg-[#0f2858] text-white">
+                          <tr><th className="px-4 py-2">Metric</th><th className="px-4 py-2 text-right">Value</th></tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 bg-white">
+                          <tr className="hover:bg-slate-50"><td className="px-4 py-2 font-medium">Total Assets</td>{renderCell(reportMetrics.total, () => handleReportCellClick('all', 'ALL', 'count', 'Total Assets'), 'px-4 py-2 text-right font-bold text-slate-800')}</tr>
+                          <tr className="hover:bg-slate-50"><td className="px-4 py-2 font-medium">Models</td><td className="px-4 py-2 text-right font-bold text-slate-800">{reportMetrics.uniqueModels}</td></tr>
+                          <tr className="hover:bg-slate-50"><td className="px-4 py-2 font-medium">Total Categories</td><td className="px-4 py-2 text-right font-bold text-slate-800">{reportMetrics.totalCategories}</td></tr>
+                          <tr className="hover:bg-slate-50"><td className="px-4 py-2 font-medium text-emerald-600">Assets (Covered by Warranty)</td>{renderCell(reportMetrics.covered, () => handleReportCellClick('all', 'ALL', 'covered', 'Covered by Warranty'), 'px-4 py-2 text-right font-bold text-emerald-600')}</tr>
+                          <tr className="hover:bg-slate-50"><td className="px-4 py-2 font-medium text-red-500">Assets (Out of Warranty)</td>{renderCell(reportMetrics.outOfWty, () => handleReportCellClick('all', 'ALL', 'outOfWty', 'Out of Warranty'), 'px-4 py-2 text-right font-bold text-red-500')}</tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    {/* Location Table */}
+                    <div className="border border-slate-200 rounded-lg overflow-hidden h-full max-h-64 overflow-y-auto">
+                      <table className="w-full text-sm text-left relative">
+                        <thead className="bg-[#0f2858] text-white sticky top-0">
+                          <tr><th className="px-4 py-2">Default Location</th><th className="px-4 py-2 text-right">Count</th></tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 bg-white">
+                          {reportLocations.map((loc, i) => (
+                            <tr key={i} className="hover:bg-slate-50">
+                              <td className="px-4 py-2 font-medium">{loc.name}</td>
+                              {renderCell(loc.count, () => handleReportCellClick('location', loc.name, 'count', 'Location Total'), 'px-4 py-2 text-right font-bold text-slate-800')}
+                            </tr>
+                          ))}
+                          {reportLocations.length === 0 && <tr><td colSpan="2" className="px-4 py-4 text-center text-slate-400">No location data found.</td></tr>}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
 
-                  {[
-                    { key: "READY FOR ASSIGNMENT", color: "green", label: "Ready for Assignment" },
-                    { key: "READY FOR DISPOSAL", color: "slate", label: "Ready for Disposal" },
-                    { key: "BROKEN (DEPLOYABLE)", color: "orange", label: "Broken (Deployable)" },
-                    { key: "EVALUATE / INVESTIGATE", color: "emerald", label: "Evaluate / Investigate" },
-                    { key: "OUT FOR REPAIR", color: "teal", label: "Out for Repair" },
-                    { key: "LOST OR STOLEN", color: "red", label: "Lost / Stolen" }
-                  ].map(statConfig => {
-                    const colorClasses = getStatColorClasses(statConfig.color);
-                    return (
-                    <button key={statConfig.key} onClick={() => setSelectedStatus(statConfig.key)} className={"flex-1 min-w-[160px] flex flex-col items-start px-4 py-3 rounded-lg border-2 bg-white shadow-sm transition-colors group h-fit " + colorClasses.border}>
-                      <div className="flex justify-between w-full">
-                        <span className={"text-xs font-bold tracking-wider uppercase " + colorClasses.text}>{statConfig.label}</span>
-                        <Info size={16} className={"opacity-0 group-hover:opacity-100 transition-opacity " + colorClasses.icon} />
-                      </div>
-                      <span className={"text-2xl font-bold leading-none mt-1 " + colorClasses.textDark}>{stats[statConfig.key]}</span>
-                      <div className="mt-3 text-[11px] w-full flex flex-col gap-1">
-                        <div className="flex justify-between items-center px-2 py-1 bg-emerald-50 text-emerald-700 rounded border border-emerald-100 group-hover:bg-emerald-100 transition-colors">
-                          <span className="flex items-center gap-1"><ShieldCheck size={12}/> Covered</span> 
-                          <strong className="text-emerald-800">{stats[statConfig.key + "_covered"]}</strong>
-                        </div>
-                        <div className="flex justify-between items-center px-2 py-1 bg-red-50 text-red-700 rounded border border-red-100 group-hover:bg-red-100 transition-colors">
-                          <span className="flex items-center gap-1"><ShieldAlert size={12}/> Out of Wty</span> 
-                          <strong className="text-red-800">{stats[statConfig.key] - stats[statConfig.key + "_covered"]}</strong>
-                        </div>
-                      </div>
-                    </button>
-                  )})}
-                </div>
-                <p className="text-xs text-slate-400 mt-6 text-center">Click any status pill to view detailed Warranty & Repair analysis.</p>
-              </div>
-            </section>
-
-            {path.length > 0 && (
-              <div>
-                <button onClick={() => navigateUp(path.length - 1)} className="flex items-center gap-2 text-slate-600 hover:text-blue-600 bg-white border border-slate-200 px-4 py-2 rounded-lg font-medium shadow-sm transition-colors w-fit">
-                  <ArrowLeft size={16} />
-                  Go Back
-                </button>
-              </div>
-            )}
-
-            {path.length < 4 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {options.map(([name, count]) => (
-                  <button key={name} onClick={() => drillDown(name)} className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hover:shadow-md hover:border-blue-300 transition-all flex flex-col items-center justify-center gap-4 text-center group">
-                    <div className="bg-slate-50 p-4 rounded-full group-hover:bg-blue-50 transition-colors">{getIconForCategory(name, path[0])}</div>
-                    <div>
-                      <h3 className="font-bold text-slate-800 text-lg group-hover:text-blue-700 transition-colors">{name}</h3>
-                      <p className="text-sm text-slate-500 mt-1">{count} Assets</p>
+                  {/* Category Summary */}
+                  <div>
+                    <h3 className="font-bold text-slate-800 text-lg mb-3">Category Summary</h3>
+                    <div className="border border-slate-200 rounded-lg overflow-x-auto shadow-sm max-h-96 overflow-y-auto">
+                      <table className="w-full text-sm text-left whitespace-nowrap relative">
+                        <thead className="bg-[#0f2858] text-white text-xs sticky top-0 z-10">
+                          <tr>
+                            <th className="px-4 py-3">Category</th>
+                            <th className="px-4 py-3 text-right">Count</th>
+                            <th className="px-4 py-3 text-right text-emerald-300">Covered</th>
+                            <th className="px-4 py-3 text-right text-red-300 border-r border-slate-500">Out Wty</th>
+                            {showAssigned && <th className="px-4 py-3 text-right">Assigned</th>}
+                            {showBrokenDeployed && <th className="px-4 py-3 text-right">Broken (Deployed)</th>}
+                            {showReadyAssign && <th className="px-4 py-3 text-right">Ready for Assignment</th>}
+                            {showReadyDispose && <th className="px-4 py-3 text-right">Ready for Disposal</th>}
+                            {showEvaluate && <th className="px-4 py-3 text-right">Evaluate / Investigate</th>}
+                            {showRepair && <th className="px-4 py-3 text-right">Out for Repair</th>}
+                            {showLost && <th className="px-4 py-3 text-right">Lost or Stolen</th>}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 bg-white">
+                          {reportCategories.map((row, i) => (
+                            <tr key={i} className="hover:bg-slate-50">
+                              <td className="px-4 py-3 font-medium text-slate-700">{row.name}</td>
+                              {renderCell(row.count, () => handleReportCellClick('category', row.name, 'count', 'Total Count'), 'px-4 py-3 text-right font-bold text-slate-800')}
+                              {renderCell(row.covered, () => handleReportCellClick('category', row.name, 'covered', 'Covered by Warranty'), 'px-4 py-3 text-right font-semibold text-emerald-600')}
+                              {renderCell(row.outOfWty, () => handleReportCellClick('category', row.name, 'outOfWty', 'Out of Warranty'), 'px-4 py-3 text-right font-semibold text-red-500 border-r border-slate-100')}
+                              {showAssigned && renderCell(row.assigned, () => handleReportCellClick('category', row.name, 'assigned', 'Assigned'), 'px-4 py-3 text-right text-slate-600')}
+                              {showBrokenDeployed && renderCell(row.brokenDeployed, () => handleReportCellClick('category', row.name, 'brokenDeployed', 'Broken (Deployed)'), 'px-4 py-3 text-right text-slate-600')}
+                              {showReadyAssign && renderCell(row.readyAssign, () => handleReportCellClick('category', row.name, 'readyAssign', 'Ready for Assignment'), 'px-4 py-3 text-right text-slate-600')}
+                              {showReadyDispose && renderCell(row.readyDispose, () => handleReportCellClick('category', row.name, 'readyDispose', 'Ready for Disposal'), 'px-4 py-3 text-right text-slate-600')}
+                              {showEvaluate && renderCell(row.evaluate, () => handleReportCellClick('category', row.name, 'evaluate', 'Evaluate / Investigate'), 'px-4 py-3 text-right text-slate-600')}
+                              {showRepair && renderCell(row.repair, () => handleReportCellClick('category', row.name, 'repair', 'Out for Repair'), 'px-4 py-3 text-right text-slate-600')}
+                              {showLost && renderCell(row.lost, () => handleReportCellClick('category', row.name, 'lost', 'Lost or Stolen'), 'px-4 py-3 text-right text-slate-600')}
+                            </tr>
+                          ))}
+                          {reportCategories.length === 0 && <tr><td colSpan={4 + [showAssigned, showBrokenDeployed, showReadyAssign, showReadyDispose, showEvaluate, showRepair, showLost].filter(Boolean).length} className="px-4 py-8 text-center text-slate-400">No records found.</td></tr>}
+                        </tbody>
+                      </table>
                     </div>
-                  </button>
-                ))}
-                {options.length === 0 && (<div className="col-span-full py-12 text-center text-slate-500 bg-white rounded-xl border border-dashed border-slate-300">No sub-categories found.</div>)}
+                  </div>
+
+                  {/* Model Summary */}
+                  <div>
+                    <h3 className="font-bold text-slate-800 text-lg mb-3">Model Summary</h3>
+                    <div className="border border-slate-200 rounded-lg overflow-x-auto shadow-sm max-h-96 overflow-y-auto">
+                      <table className="w-full text-sm text-left whitespace-nowrap relative">
+                        <thead className="bg-[#0f2858] text-white text-xs sticky top-0 z-10">
+                          <tr>
+                            <th className="px-4 py-3">Category</th>
+                            <th className="px-4 py-3">Model</th>
+                            <th className="px-4 py-3 text-right">Count</th>
+                            <th className="px-4 py-3 text-right text-emerald-300">Covered</th>
+                            <th className="px-4 py-3 text-right text-red-300 border-r border-slate-500">Out Wty</th>
+                            {showAssigned && <th className="px-4 py-3 text-right">Assigned</th>}
+                            {showBrokenDeployed && <th className="px-4 py-3 text-right">Broken (Deployed)</th>}
+                            {showReadyAssign && <th className="px-4 py-3 text-right">Ready for Assignment</th>}
+                            {showReadyDispose && <th className="px-4 py-3 text-right">Ready for Disposal</th>}
+                            {showEvaluate && <th className="px-4 py-3 text-right">Evaluate / Investigate</th>}
+                            {showRepair && <th className="px-4 py-3 text-right">Out for Repair</th>}
+                            {showLost && <th className="px-4 py-3 text-right">Lost or Stolen</th>}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 bg-white">
+                          {reportModels.map((row, i) => (
+                            <tr key={i} className="hover:bg-slate-50">
+                              <td className="px-4 py-3 font-medium text-slate-500">{row.mainCategory}</td>
+                              <td className="px-4 py-3 font-medium text-slate-700">{row.name}</td>
+                              {renderCell(row.count, () => handleReportCellClick('model', row.name, 'count', 'Total Count'), 'px-4 py-3 text-right font-bold text-slate-800')}
+                              {renderCell(row.covered, () => handleReportCellClick('model', row.name, 'covered', 'Covered by Warranty'), 'px-4 py-3 text-right font-semibold text-emerald-600')}
+                              {renderCell(row.outOfWty, () => handleReportCellClick('model', row.name, 'outOfWty', 'Out of Warranty'), 'px-4 py-3 text-right font-semibold text-red-500 border-r border-slate-100')}
+                              {showAssigned && renderCell(row.assigned, () => handleReportCellClick('model', row.name, 'assigned', 'Assigned'), 'px-4 py-3 text-right text-slate-600')}
+                              {showBrokenDeployed && renderCell(row.brokenDeployed, () => handleReportCellClick('model', row.name, 'brokenDeployed', 'Broken (Deployed)'), 'px-4 py-3 text-right text-slate-600')}
+                              {showReadyAssign && renderCell(row.readyAssign, () => handleReportCellClick('model', row.name, 'readyAssign', 'Ready for Assignment'), 'px-4 py-3 text-right text-slate-600')}
+                              {showReadyDispose && renderCell(row.readyDispose, () => handleReportCellClick('model', row.name, 'readyDispose', 'Ready for Disposal'), 'px-4 py-3 text-right text-slate-600')}
+                              {showEvaluate && renderCell(row.evaluate, () => handleReportCellClick('model', row.name, 'evaluate', 'Evaluate / Investigate'), 'px-4 py-3 text-right text-slate-600')}
+                              {showRepair && renderCell(row.repair, () => handleReportCellClick('model', row.name, 'repair', 'Out for Repair'), 'px-4 py-3 text-right text-slate-600')}
+                              {showLost && renderCell(row.lost, () => handleReportCellClick('model', row.name, 'lost', 'Lost or Stolen'), 'px-4 py-3 text-right text-slate-600')}
+                            </tr>
+                          ))}
+                          {reportModels.length === 0 && <tr><td colSpan={5 + [showAssigned, showBrokenDeployed, showReadyAssign, showReadyDispose, showEvaluate, showRepair, showLost].filter(Boolean).length} className="px-4 py-8 text-center text-slate-400">No records found.</td></tr>}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                </div>
               </div>
             ) : (
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                  <h3 className="font-semibold text-slate-800 shrink-0">Asset Inventory ({tableData.length})</h3>
-                  <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                      <input type="text" placeholder="Search serial or model..." value={inventorySearch} onChange={(e) => setInventorySearch(e.target.value)} className="pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                    </div>
-                    <select value={inventoryStatusFilter} onChange={(e) => setInventoryStatusFilter(e.target.value)} className="px-4 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-auto">
-                      <option value="ALL">All Statuses</option>
-                      {availableStatuses.map(status => (<option key={status} value={status}>{status}</option>))}
-                    </select>
+
+            /* ---------------- DASHBOARD TAB VIEW ---------------- */
+            <React.Fragment>
+              <section className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in duration-300">
+                <div className="bg-slate-800 px-6 py-4 flex items-center justify-between">
+                  <h2 className="text-white font-semibold text-lg flex items-center gap-2">
+                    <Activity size={20} className="text-blue-400"/> Current View Status
+                  </h2>
+                  <div className="bg-white/10 px-4 py-1 rounded-full text-white font-mono text-sm border border-white/20">
+                    Total Count: {stats.total}
                   </div>
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm text-left">
-                    <thead className="bg-slate-100 text-slate-600 uppercase text-xs">
-                      <tr><th className="px-6 py-3">Serial Number</th><th className="px-6 py-3">Model</th><th className="px-6 py-3">Status</th><th className="px-6 py-3">Warranty</th></tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {tableData.slice(0, 100).map((item, i) => (
-                        <tr key={i} className="hover:bg-slate-50 transition-colors">
-                          <td className="px-6 py-4 font-mono font-medium">{item.originalRow[8] || "N/A"}</td>
-                          <td className="px-6 py-4">{item.model}</td>
-                          <td className="px-6 py-4"><span className="bg-slate-100 text-slate-800 px-2 py-1 rounded text-xs font-bold border border-slate-200">{item.assignedSubStatus || item.primaryStatus}</span></td>
-                          <td className="px-6 py-4">
-                            {item.isCovered ? (
-                              <span className="text-emerald-600 font-semibold flex items-center gap-1"><ShieldCheck size={14}/> Covered</span>
-                            ) : (
-                              <div className="flex flex-col">
-                                <span className="text-red-500 font-semibold flex items-center gap-1"><ShieldAlert size={14}/> Out of Warranty</span>
-                                {item.isVoidedByDamage && <span className="text-[10px] text-red-400 font-bold uppercase mt-0.5 leading-tight">Voided (Broken)</span>}
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {tableData.length > 100 && (<div className="p-4 text-center text-xs text-slate-500 bg-slate-50">Showing first 100 items.</div>)}
+                <div className="p-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                    <div className="flex flex-col gap-2 h-full w-full">
+                      <button onClick={() => setExpandedAssigned(!expandedAssigned)} className={"flex flex-col items-start px-4 py-3 rounded-lg border-2 transition-all w-full h-full " + (expandedAssigned ? "bg-blue-50 border-blue-400 shadow-inner" : "bg-white border-blue-200 hover:border-blue-400 shadow-sm")}>
+                        <div className="flex justify-between items-start w-full">
+                          <div className="flex flex-col text-left">
+                            <span className="text-xs font-bold text-blue-500 tracking-wider uppercase">Assigned</span>
+                            <span className="text-2xl font-bold text-blue-900 leading-none mt-1">{stats["ASSIGNED_TOTAL"]}</span>
+                          </div>
+                          <ChevronRight size={20} className={"text-blue-400 mt-1 transition-transform shrink-0 " + (expandedAssigned ? "rotate-90" : "")} />
+                        </div>
+                        <div className="mt-auto pt-3 text-[11px] w-full flex flex-col gap-1">
+                          <div className="flex justify-between items-center px-2 py-1 bg-[#C3D48D]/20 border border-[#C3D48D] rounded transition-colors hover:bg-[#C3D48D]/40">
+                            <span className="flex items-center gap-1 font-semibold text-[#5a6b28]"><ShieldCheck size={12}/> Covered</span> 
+                            <strong className="text-[#3b4718]">{stats["ASSIGNED_TOTAL_covered"]}</strong>
+                          </div>
+                          <div className="flex justify-between items-center px-2 py-1 bg-[#FF9A9E]/20 border border-[#FF9A9E] rounded transition-colors hover:bg-[#FF9A9E]/40">
+                            <span className="flex items-center gap-1 font-semibold text-[#b82d33]"><ShieldAlert size={12}/> Out of Wty</span> 
+                            <strong className="text-[#8c1e23]">{stats["ASSIGNED_TOTAL"] - stats["ASSIGNED_TOTAL_covered"]}</strong>
+                          </div>
+                        </div>
+                      </button>
+                      {expandedAssigned && (
+                        <div className="flex flex-col gap-2 mt-1 animate-in fade-in slide-in-from-top-2">
+                          <button onClick={() => setSelectedStatus("ASSIGNED_CLEAN")} className="bg-blue-100 hover:bg-blue-200 text-blue-800 px-3 py-2 rounded shadow-sm transition-colors text-left flex justify-between items-center w-full">
+                            <span className="text-xs font-bold">ASSIGNED</span>
+                            <span className="text-sm font-bold bg-white/50 px-2 py-0.5 rounded">{stats["ASSIGNED_CLEAN"]}</span>
+                          </button>
+                          <button onClick={() => setSelectedStatus("ASSIGNED_BROKEN")} className="bg-purple-100 hover:bg-purple-200 text-purple-800 px-3 py-2 rounded shadow-sm transition-colors text-left flex justify-between items-center w-full">
+                            <span className="text-xs font-bold leading-tight">BROKEN<br/>(DEPLOYED)</span>
+                            <span className="text-sm font-bold bg-white/50 px-2 py-0.5 rounded">{stats["ASSIGNED_BROKEN"]}</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {[
+                      { key: "READY FOR ASSIGNMENT", color: "green", label: "Ready for Assignment" },
+                      { key: "READY FOR DISPOSAL", color: "slate", label: "Ready for Disposal" },
+                      { key: "BROKEN (DEPLOYABLE)", color: "orange", label: "Broken (Deployable)" },
+                      { key: "EVALUATE / INVESTIGATE", color: "emerald", label: "Evaluate / Investigate" },
+                      { key: "OUT FOR REPAIR", color: "teal", label: "Out for Repair" },
+                      { key: "LOST OR STOLEN", color: "red", label: "Lost / Stolen" }
+                    ].map(statConfig => {
+                      const colorClasses = getStatColorClasses(statConfig.color);
+                      return (
+                      <button key={statConfig.key} onClick={() => setSelectedStatus(statConfig.key)} className={"flex flex-col items-start px-4 py-3 rounded-lg border-2 bg-white shadow-sm transition-colors group h-full w-full " + colorClasses.border}>
+                        <div className="flex justify-between items-start w-full">
+                          <span className={"text-xs font-bold tracking-wider uppercase text-left pr-2 " + colorClasses.text}>{statConfig.label}</span>
+                          <Info size={16} className={"opacity-0 group-hover:opacity-100 transition-opacity shrink-0 " + colorClasses.icon} />
+                        </div>
+                        <span className={"text-2xl font-bold leading-none mt-1 " + colorClasses.textDark}>{stats[statConfig.key]}</span>
+                        <div className="mt-auto pt-3 text-[11px] w-full flex flex-col gap-1">
+                          <div className="flex justify-between items-center px-2 py-1 bg-[#C3D48D]/20 border border-[#C3D48D] rounded transition-colors hover:bg-[#C3D48D]/40">
+                            <span className="flex items-center gap-1 font-semibold text-[#5a6b28]"><ShieldCheck size={12}/> Covered</span> 
+                            <strong className="text-[#3b4718]">{stats[statConfig.key + "_covered"]}</strong>
+                          </div>
+                          <div className="flex justify-between items-center px-2 py-1 bg-[#FF9A9E]/20 border border-[#FF9A9E] rounded transition-colors hover:bg-[#FF9A9E]/40">
+                            <span className="flex items-center gap-1 font-semibold text-[#b82d33]"><ShieldAlert size={12}/> Out of Wty</span> 
+                            <strong className="text-[#8c1e23]">{stats[statConfig.key] - stats[statConfig.key + "_covered"]}</strong>
+                          </div>
+                        </div>
+                      </button>
+                    )})}
+                  </div>
+                  <p className="text-xs text-slate-400 mt-6 text-center">Click any status pill to view detailed Warranty & Repair analysis.</p>
                 </div>
-              </div>
+              </section>
+
+              {path.length > 0 && (
+                <div>
+                  <button onClick={() => navigateUp(path.length - 1)} className="flex items-center gap-2 text-slate-600 hover:text-blue-600 bg-white border border-slate-200 px-4 py-2 rounded-lg font-medium shadow-sm transition-colors w-fit">
+                    <ArrowLeft size={16} />
+                    Go Back
+                  </button>
+                </div>
+              )}
+
+              {path.length < 4 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-in fade-in duration-300">
+                  {options.map(([name, count]) => (
+                    <button key={name} onClick={() => drillDown(name)} className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hover:shadow-md hover:border-blue-300 transition-all flex flex-col items-center justify-center gap-4 text-center group">
+                      <div className="bg-slate-50 p-4 rounded-full group-hover:bg-blue-50 transition-colors">{getIconForCategory(name, path[0])}</div>
+                      <div>
+                        <h3 className="font-bold text-slate-800 text-lg group-hover:text-blue-700 transition-colors">{name}</h3>
+                        <p className="text-sm text-slate-500 mt-1">{count} Assets</p>
+                      </div>
+                    </button>
+                  ))}
+                  {options.length === 0 && (<div className="col-span-full py-12 text-center text-slate-500 bg-white rounded-xl border border-dashed border-slate-300">No sub-categories found.</div>)}
+                </div>
+              ) : (
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in duration-300">
+                  <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <h3 className="font-semibold text-slate-800 shrink-0">Asset Inventory ({tableData.length})</h3>
+                    <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                        <input type="text" placeholder="Search serial or model..." value={inventorySearch} onChange={(e) => setInventorySearch(e.target.value)} className="pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                      <select value={inventoryStatusFilter} onChange={(e) => setInventoryStatusFilter(e.target.value)} className="px-4 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-auto">
+                        <option value="ALL">All Statuses</option>
+                        {availableStatuses.map(status => (<option key={status} value={status}>{status}</option>))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                      <thead className="bg-slate-100 text-slate-600 uppercase text-xs">
+                        <tr><th className="px-6 py-3">Serial Number</th><th className="px-6 py-3">Model</th><th className="px-6 py-3">Status</th><th className="px-6 py-3">Warranty</th></tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {tableData.slice(0, 100).map((item, i) => (
+                          <tr key={i} className="hover:bg-slate-50 transition-colors">
+                            <td className="px-6 py-4 font-mono font-medium">{item.originalRow[8] || "N/A"}</td>
+                            <td className="px-6 py-4">{item.model}</td>
+                            <td className="px-6 py-4"><span className="bg-slate-100 text-slate-800 px-2 py-1 rounded text-xs font-bold border border-slate-200">{item.assignedSubStatus || item.primaryStatus}</span></td>
+                            <td className="px-6 py-4">
+                              {item.isCovered ? (
+                                <span className="text-emerald-600 font-semibold flex items-center gap-1"><ShieldCheck size={14}/> Covered ({item.warrantyLimit}Y)</span>
+                              ) : (
+                                <div className="flex flex-col">
+                                  <span className="text-red-500 font-semibold flex items-center gap-1"><ShieldAlert size={14}/> Out of Warranty ({item.warrantyLimit}Y)</span>
+                                  {item.isVoidedByDamage && <span className="text-[10px] text-red-400 font-bold uppercase mt-0.5 leading-tight">Voided (Broken)</span>}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {tableData.length > 100 && (<div className="p-4 text-center text-xs text-slate-500 bg-slate-50">Showing first 100 items.</div>)}
+                  </div>
+                </div>
+              )}
+            </React.Fragment>
             )}
           </main>
 
-          {selectedStatus && (
+          {/* STATUS MODAL (DASHBOARD ONLY) */}
+          {selectedStatus && activeTab === 'dashboard' && (
             <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={(e) => { if(e.target === e.currentTarget) setSelectedStatus(null) }}>
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
                 <div className="bg-slate-800 p-6 text-white flex justify-between items-start">
@@ -780,7 +1309,7 @@
                               <span className="bg-emerald-600 text-white font-bold text-xl px-3 py-1 rounded-lg">{conditionA.length}</span>
                             </div>
                             <div className="p-5 flex-1">
-                              <p className="text-sm text-emerald-900 mb-4 bg-emerald-100/50 p-3 rounded-lg border border-emerald-200"><strong>Logic:</strong> Asset age &lt; 3 years from Purchase Date.</p>
+                              <p className="text-sm text-emerald-900 mb-4 bg-emerald-100/50 p-3 rounded-lg border border-emerald-200"><strong>Logic:</strong> Asset age is within its assigned warranty period (1, 2, or 3 years) from Purchase Date.</p>
                               <h4 className="font-semibold text-slate-800 mb-3 uppercase text-xs tracking-wider">Action Flow: Warranty Claim</h4>
                               <div className="space-y-3">
                                 <div className="bg-white p-3 rounded-lg border border-emerald-200 shadow-sm relative overflow-hidden">
@@ -808,7 +1337,7 @@
                               <span className="bg-red-600 text-white font-bold text-xl px-3 py-1 rounded-lg">{conditionB.length}</span>
                             </div>
                             <div className="p-5 flex-1">
-                              <p className="text-sm text-red-900 mb-4 bg-red-100/50 p-3 rounded-lg border border-red-200"><strong>Logic:</strong> Asset age &ge; 3 years OR Warranty explicitly Voided.</p>
+                              <p className="text-sm text-red-900 mb-4 bg-red-100/50 p-3 rounded-lg border border-red-200"><strong>Logic:</strong> Asset age exceeds its assigned warranty period OR Warranty explicitly Voided.</p>
                               <h4 className="font-semibold text-slate-800 mb-2 uppercase text-xs tracking-wider">Action Flow:</h4>
                               <div className="bg-white p-4 rounded-lg border border-red-200 shadow-sm mt-4 flex items-center gap-3">
                                 <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0"><HardDrive className="text-red-600" size={20}/></div>
@@ -827,6 +1356,65 @@
               </div>
             </div>
           )}
+
+          {/* REPORTS TAB DRILLDOWN MODAL */}
+          {reportDrilldown && activeTab === 'reports' && (
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={(e) => { if(e.target === e.currentTarget) setReportDrilldown(null) }}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+                <div className="bg-slate-800 p-6 text-white flex justify-between items-start">
+                  <div>
+                    <h2 className="text-2xl font-bold mb-1 flex items-center gap-2">Asset Inventory ({reportDrilldown.data.length})</h2>
+                    <p className="text-slate-300 text-sm">Filter: {reportDrilldown.title}</p>
+                  </div>
+                  <button onClick={() => setReportDrilldown(null)} className="text-slate-400 hover:text-white bg-slate-700 hover:bg-slate-600 rounded-full p-2 transition-colors"><ArrowLeft size={20} /></button>
+                </div>
+                
+                <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-end">
+                  <div className="relative w-full sm:w-64">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                    <input type="text" placeholder="Search serial or model..." value={reportDrilldownSearch} onChange={(e) => setReportDrilldownSearch(e.target.value)} className="pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                </div>
+
+                <div className="p-0 overflow-x-auto overflow-y-auto flex-1 bg-white">
+                  <table className="w-full text-sm text-left">
+                    <thead className="bg-slate-100 text-slate-600 uppercase text-xs sticky top-0 z-10">
+                      <tr><th className="px-6 py-3">Serial Number</th><th className="px-6 py-3">Model</th><th className="px-6 py-3">Status</th><th className="px-6 py-3">Warranty</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {reportDrilldown.data.filter(item => {
+                        return reportDrilldownSearch === '' || 
+                          (String(item.originalRow[8] || '')).toLowerCase().includes(reportDrilldownSearch.toLowerCase()) ||
+                          String(item.model || '').toLowerCase().includes(reportDrilldownSearch.toLowerCase());
+                      }).slice(0, 500).map((item, i) => (
+                        <tr key={i} className="hover:bg-slate-50 transition-colors">
+                          <td className="px-6 py-4 font-mono font-medium">{item.originalRow[8] || "N/A"}</td>
+                          <td className="px-6 py-4">{item.model}</td>
+                          <td className="px-6 py-4"><span className="bg-slate-100 text-slate-800 px-2 py-1 rounded text-xs font-bold border border-slate-200">{item.assignedSubStatus || item.primaryStatus}</span></td>
+                          <td className="px-6 py-4">
+                            {item.isCovered ? (
+                              <span className="text-emerald-600 font-semibold flex items-center gap-1"><ShieldCheck size={14}/> Covered ({item.warrantyLimit}Y)</span>
+                            ) : (
+                              <div className="flex flex-col">
+                                <span className="text-red-500 font-semibold flex items-center gap-1"><ShieldAlert size={14}/> Out of Warranty ({item.warrantyLimit}Y)</span>
+                                {item.isVoidedByDamage && <span className="text-[10px] text-red-400 font-bold uppercase mt-0.5 leading-tight">Voided (Broken)</span>}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {reportDrilldown.data.length > 500 && (<div className="p-4 text-center text-xs text-slate-500 bg-slate-50 border-t border-slate-100">Showing first 500 items.</div>)}
+                  {reportDrilldown.data.length === 0 && (<div className="p-10 text-center text-sm text-slate-500 bg-white">No assets found matching this criteria.</div>)}
+                </div>
+                <div className="bg-white p-4 border-t border-slate-200 text-right">
+                  <button onClick={() => setReportDrilldown(null)} className="bg-slate-800 hover:bg-slate-700 text-white px-6 py-2 rounded-lg font-medium transition-colors">Close</button>
+                </div>
+              </div>
+            </div>
+          )}
+
         </div>
       );
     }
