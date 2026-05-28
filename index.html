@@ -846,7 +846,15 @@
           if (item.drilldownPath.length > levelIndex) {
             const key = item.drilldownPath[levelIndex];
             if (key && key !== 'Unknown') {
-              optionsMap[key] = (optionsMap[key] || 0) + 1;
+              if (!optionsMap[key]) {
+                optionsMap[key] = { count: 0, covered: 0, outOfWty: 0 };
+              }
+              optionsMap[key].count++;
+              if (item.isCovered) {
+                optionsMap[key].covered++;
+              } else {
+                optionsMap[key].outOfWty++;
+              }
               hasNextLevel = true;
             }
           }
@@ -858,7 +866,7 @@
         if (levelIndex === 0) {
           entries.sort((a, b) => (CATEGORY_ORDER[a[0]] || 99) - (CATEGORY_ORDER[b[0]] || 99));
         } else {
-          entries.sort((a, b) => b[1] - a[1]);
+          entries.sort((a, b) => b[1].count - a[1].count);
         }
         return entries;
       };
@@ -1266,12 +1274,25 @@
 
               {options !== null ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-in fade-in duration-300">
-                  {options.map(([name, count]) => (
+                  {options.map(([name, statsObj]) => (
                     <button key={name} onClick={() => drillDown(name)} className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hover:shadow-md hover:border-blue-300 transition-all flex flex-col items-center justify-center gap-4 text-center group">
                       <div className="bg-slate-50 p-4 rounded-full group-hover:bg-blue-50 transition-colors">{getIconForCategory(name, path[0])}</div>
-                      <div>
+                      <div className="w-full">
                         <h3 className="font-bold text-slate-800 text-lg group-hover:text-blue-700 transition-colors">{name}</h3>
-                        <p className="text-sm text-slate-500 mt-1">{count} Assets</p>
+                        <p className="text-sm text-slate-500 mt-1">{statsObj.count} Assets</p>
+                        
+                        <div className="mt-3 flex flex-col items-center justify-center w-full">
+                          <div className="text-[13px] text-slate-800 font-medium flex justify-center items-center gap-1 w-full">
+                            <span className="w-16 text-center">Covered</span>
+                            <span className="w-20 text-center">Out of Wty</span>
+                          </div>
+                          <div className="text-sm font-bold flex justify-center items-center gap-1 w-full mt-1">
+                            <span className="text-[#5C6B42] w-16 text-center">{statsObj.covered}</span>
+                            <span className="text-slate-800 font-normal">/</span>
+                            <span className="text-[#EE536B] w-20 text-center">{statsObj.outOfWty}</span>
+                          </div>
+                        </div>
+
                       </div>
                     </button>
                   ))}
