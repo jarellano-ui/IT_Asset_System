@@ -168,6 +168,8 @@
       const enrichedData = useMemo(() => {
         if (!rawData || rawData.length === 0) return [];
         
+        const assetNameIdx = headers.findIndex(h => String(h || '').toLowerCase().trim() === 'asset name');
+
         return rawData.map((row, index) => {
           const modelStr = String(row[4] || '').toUpperCase();
           const categoryCol = String(row[6] || '').toUpperCase();
@@ -183,50 +185,63 @@
                             (modelStr.includes('HEADSET') && modelStr.includes('ADAPTER')) || 
                             (modelStr.includes('JABRA') && modelStr.includes('LINK'));
                             
-          const looksLikeHeadset = /HEADSET|JABRA|BIZ|ADDASOUND|EVOLVE|EPIC/.test(modelStr);
-          const isHeadset = !isAdapter && (categoryCol.includes('HEADSET') || looksLikeHeadset);
-          
+          const looksLikeHeadset = !isAdapter && (categoryCol.includes('HEADSET') || /HEADSET|JABRA|BIZ|ADDASOUND|EVOLVE|EPIC/.test(modelStr));
+
+          const isPhone = categoryCol === 'PHONES' || categoryCol === 'PHONE';
+
           const looksLikeComputer = /MACBOOK|OPTIPLEX|THINKPAD|LATITUDE|PROBOOK|VOSTRO|NITRO|HELIOS|TRAVELMATE/.test(modelStr);
-          const isComputer = categoryCol.includes('LAPTOP') || categoryCol.includes('DESKTOP') || categoryCol.includes('COMPUTER') || categoryCol.includes('MAC') || looksLikeComputer;
+          const isComputer = !isMonitor && !isAdapter && !looksLikeHeadset && !isPhone && (categoryCol.includes('LAPTOP') || categoryCol.includes('DESKTOP') || categoryCol.includes('COMPUTER') || categoryCol.includes('MAC') || looksLikeComputer);
 
           let mainCat = 'Accessories & Others';
-          let subCat = 'Unknown';
-          let type = 'Unknown';
           let matchedModel = row[4] || 'Unknown Model';
+          let assetName = assetNameIdx > -1 ? (row[assetNameIdx] || 'Unknown Name') : (row[3] || 'Unknown Name');
+          let drilldownPath = [];
 
           if (isComputer) {
             if (categoryCol.includes('DESKTOP') || modelStr.includes('OPTIPLEX') || modelStr.includes('DESKTOP') || modelStr.includes('MICRO')) {
               mainCat = 'Desktop';
-              subCat = 'Windows';
-              type = 'Desktop';
+              drilldownPath = [mainCat, 'Windows', 'Desktop', matchedModel];
             } else {
               mainCat = 'Laptop';
               if (categoryCol.includes('MAC') || modelStr.includes('MACBOOK') || modelStr.includes('MAC')) {
-                subCat = 'MacOS';
-                type = 'MacBook';
+                drilldownPath = [mainCat, 'MacOS', 'MacBook', matchedModel];
               } else {
-                subCat = 'Windows';
-                type = 'Laptop';
+                drilldownPath = [mainCat, 'Windows', 'Laptop', matchedModel];
               }
             }
           } else if (isMonitor) {
             mainCat = 'Monitor';
-            subCat = 'Monitor';
-            if (modelStr.includes('24')) type = '24-inch';
-            else if (modelStr.includes('22') || modelStr.includes('E2219HN')) type = '22-inch';
-            else type = 'Others';
+            let size = 'Others';
+            if (modelStr.includes('24')) size = '24-inch';
+            else if (modelStr.includes('22') || modelStr.includes('E2219HN')) size = '22-inch';
+            drilldownPath = [mainCat, size, matchedModel];
+          } else if (isPhone) {
+            mainCat = 'Accessories & Others';
+            const assetNameStr = String(assetName || '').toUpperCase();
+            const searchStr = `${modelStr} ${assetNameStr}`;
+            
+            let os = 'Android'; // Changed default from 'Others' to 'Android'
+            if (searchStr.includes('IPHONE')) {
+              os = 'IOS';
+            } else if (searchStr.includes('ANDROID') && !searchStr.includes('TV')) {
+              os = 'Android';
+            }
+            
+            drilldownPath = [mainCat, 'Phones', os, matchedModel];
           } else if (isAdapter) {
             mainCat = 'Headset Adapter';
-            subCat = 'Adapter';
-            type = 'USB';
-          } else if (isHeadset) {
+            drilldownPath = [mainCat, matchedModel];
+          } else if (!isAdapter && (categoryCol.includes('HEADSET') || /HEADSET|JABRA|BIZ|ADDASOUND|EVOLVE|EPIC/.test(modelStr))) {
             mainCat = 'Headsets';
-            subCat = 'Headset';
-            type = modelStr.includes('USB-C') ? 'USB-C' : 'USB-A';
+            let conn = modelStr.includes('USB-C') ? 'USB-C' : 'USB-A';
+            drilldownPath = [mainCat, conn, matchedModel];
           } else {
             mainCat = 'Accessories & Others';
-            subCat = categoryCol ? (categoryCol.charAt(0) + categoryCol.slice(1).toLowerCase()) : 'Uncategorized';
-            type = 'Standard';
+            let subCat = 'Uncategorized';
+            if (categoryCol) {
+              subCat = categoryCol.charAt(0).toUpperCase() + categoryCol.slice(1).toLowerCase();
+            }
+            drilldownPath = [mainCat, subCat, matchedModel];
           }
 
           let primaryStatus = 'OTHER';
@@ -288,10 +303,10 @@
 
           return {
             _id: index,
+            assetName: assetName,
             mainCategory: mainCat,
-            subCategory: subCat,
-            type: type,
             model: matchedModel,
+            drilldownPath: drilldownPath,
             location: locationStr,
             primaryStatus: primaryStatus,
             assignedSubStatus: assignedSubStatus,
@@ -304,7 +319,7 @@
             originalRow: row
           };
         });
-      }, [rawData]);
+      }, [rawData, headers]);
 
       const availableLocations = useMemo(() => {
         const locs = new Set(enrichedData.map(item => item.location));
@@ -314,10 +329,9 @@
       const filteredData = useMemo(() => {
         return enrichedData.filter(item => {
           if (selectedLocation !== 'ALL' && item.location !== selectedLocation) return false;
-          if (path[0] && item.mainCategory !== path[0]) return false;
-          if (path[1] && item.subCategory !== path[1]) return false;
-          if (path[2] && item.type !== path[2]) return false;
-          if (path[3] && item.model !== path[3]) return false;
+          for (let i = 0; i < path.length; i++) {
+            if (item.drilldownPath[i] !== path[i]) return false;
+          }
           return true;
         });
       }, [enrichedData, path, selectedLocation]);
@@ -417,7 +431,8 @@
         return filteredData.filter(item => {
           const matchesSearch = inventorySearch === '' || 
             (String(item.originalRow[8] || '')).toLowerCase().includes(inventorySearch.toLowerCase()) ||
-            String(item.model || '').toLowerCase().includes(inventorySearch.toLowerCase());
+            String(item.model || '').toLowerCase().includes(inventorySearch.toLowerCase()) ||
+            String(item.assetName || '').toLowerCase().includes(inventorySearch.toLowerCase());
             
           const itemStatus = item.assignedSubStatus || item.primaryStatus;
           const matchesStatus = inventoryStatusFilter === 'ALL' || itemStatus === inventoryStatusFilter;
@@ -533,37 +548,56 @@
         );
       };
 
+      const processFile = (file) => {
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          try {
+            const text = evt.target.result;
+            const parsed = parseCSV(text);
+            if (parsed.length > 1) {
+              const newHeaders = parsed[0];
+              const newData = parsed.slice(1);
+              setHeaders(newHeaders);
+              setRawData(newData);
+              setPath([]);
+              setSelectedStatus(null);
+              setExpandedAssigned(false);
+              setInventorySearch('');
+              setInventoryStatusFilter('ALL');
+              setActiveTab('dashboard');
+              try {
+                sessionStorage.setItem('itAssetHeaders', JSON.stringify(newHeaders));
+                sessionStorage.setItem('itAssetData', JSON.stringify(newData));
+              } catch (err) {
+                console.warn("File too large for session storage. Data won't persist on refresh.");
+              }
+            }
+          } catch (err) {
+            alert("Failed to parse CSV file. Ensure it is a valid Snipe-IT export.");
+          }
+        };
+        reader.readAsText(file);
+      };
+
       const handleFileUpload = (e) => {
         const file = e.target.files[0];
-        if (file) {
-          const reader = new FileReader();
-          reader.onload = (evt) => {
-            try {
-              const text = evt.target.result;
-              const parsed = parseCSV(text);
-              if (parsed.length > 1) {
-                const newHeaders = parsed[0];
-                const newData = parsed.slice(1);
-                setHeaders(newHeaders);
-                setRawData(newData);
-                
-                try {
-                  sessionStorage.setItem('itAssetHeaders', JSON.stringify(newHeaders));
-                  sessionStorage.setItem('itAssetData', JSON.stringify(newData));
-                } catch (err) {
-                  console.warn("File too large for session storage. Data won't persist on refresh.");
-                }
-              }
-            } catch (err) {
-              alert("Failed to parse CSV file. Ensure it is a valid Snipe-IT export.");
-            }
-          };
-          reader.readAsText(file);
+        if (file) processFile(file);
+        e.target.value = null;
+      };
+
+      const handleFileUploadInline = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (rawData.length > 0 && !window.confirm("Are you sure you want to replace the current data with a new file?")) {
+          e.target.value = null;
+          return;
         }
+        processFile(file);
+        e.target.value = null;
       };
 
       const handleReset = () => {
-        if (window.confirm("Are you sure you want to upload a new file? The current view will be cleared.")) {
+        if (window.confirm("Are you sure you want to completely clear all data?")) {
           setRawData([]);
           setHeaders([]);
           setPath([]);
@@ -662,6 +696,11 @@
 
       // --- EXPORT EXCEL FOR REPORTS TAB ---
       const exportReportsExcel = () => {
+        if (!window.XLSX) {
+          alert("Excel export library is loading. Please try again in a few seconds.");
+          return;
+        }
+
         const headerStyle = {
           font: { bold: true, color: { rgb: "FFFFFF" } },
           fill: { fgColor: { rgb: "5C6B42" }, patternType: "solid" }
@@ -732,7 +771,7 @@
 
         // 5. Build Asset Inventory Sheet Data (Tab 2)
         const inventoryData = [];
-        inventoryData.push(["Serial Number", "Category", "Model", "Status", "Location", "Warranty", "Purchase Date"].map(createHeaderCell));
+        inventoryData.push(["Asset Name", "Serial Number", "Category", "Model", "Status", "Location", "Warranty", "Purchase Date"].map(createHeaderCell));
         
         // Sorting Logic for Asset Inventory Focus
         const statusSortOrder = {
@@ -759,6 +798,7 @@
 
         sortedInventory.forEach(item => {
           inventoryData.push([
+            item.assetName || "N/A",
             item.originalRow[8] || "N/A",
             item.mainCategory || "N/A",
             item.model || "N/A",
@@ -774,9 +814,10 @@
         const wsSummary = window.XLSX.utils.aoa_to_sheet(summaryData);
         const wsInventory = window.XLSX.utils.aoa_to_sheet(inventoryData);
 
-        const wscols = [{wch: 25}, {wch: 25}, {wch: 15}, {wch: 15}, {wch: 15}, {wch: 20}, {wch: 15}];
-        wsSummary['!cols'] = wscols;
-        wsInventory['!cols'] = wscols;
+        const wscolsSummary = [{wch: 25}, {wch: 25}, {wch: 15}, {wch: 15}, {wch: 15}, {wch: 20}, {wch: 15}];
+        const wscolsInventory = [{wch: 35}, {wch: 25}, {wch: 25}, {wch: 25}, {wch: 15}, {wch: 20}, {wch: 20}, {wch: 15}];
+        wsSummary['!cols'] = wscolsSummary;
+        wsInventory['!cols'] = wscolsInventory;
 
         window.XLSX.utils.book_append_sheet(wb, wsSummary, "Summary Dashboard");
         window.XLSX.utils.book_append_sheet(wb, wsInventory, "Asset Inventory");
@@ -786,18 +827,22 @@
       };
 
       const getNextLevelOptions = () => {
-        const optionsMap = {}; const levelIndex = path.length; let keyGetter;
-        if (levelIndex === 0) keyGetter = item => item.mainCategory;
-        else if (levelIndex === 1) keyGetter = item => item.subCategory;
-        else if (levelIndex === 2) keyGetter = item => item.type;
-        else if (levelIndex === 3) keyGetter = item => item.model;
-        else return [];
+        const optionsMap = {}; 
+        const levelIndex = path.length; 
+        let hasNextLevel = false;
         
         tableData.forEach(item => {
-          const key = keyGetter(item);
-          if (key && key !== 'Unknown') { optionsMap[key] = (optionsMap[key] || 0) + 1; }
+          if (item.drilldownPath.length > levelIndex) {
+            const key = item.drilldownPath[levelIndex];
+            if (key && key !== 'Unknown') {
+              optionsMap[key] = (optionsMap[key] || 0) + 1;
+              hasNextLevel = true;
+            }
+          }
         });
         
+        if (!hasNextLevel) return null;
+
         const entries = Object.entries(optionsMap);
         if (levelIndex === 0) {
           entries.sort((a, b) => (CATEGORY_ORDER[a[0]] || 99) - (CATEGORY_ORDER[b[0]] || 99));
@@ -811,7 +856,7 @@
         const n = String(name || '').toUpperCase(); 
         if (n === 'LAPTOP' || n === 'MACBOOK' || n.includes('LAPTOP')) return <Laptop size={iconSize} className="text-blue-500" />;
         if (n === 'DESKTOP' || n.includes('DESKTOP')) return <HardDrive size={iconSize} className="text-indigo-500" />;
-        if (n === 'HEADSETS' || n.includes('HEADSET')) return <Headphones size={iconSize} className="text-pink-500" />;
+        if (n === 'HEADSETS' || n === 'HEADSET' || n.includes('HEADSET')) return <Headphones size={iconSize} className="text-pink-500" />;
         if (n === 'MONITOR' || n.includes('MONITOR')) return <Monitor size={iconSize} className="text-teal-500" />;
         return <ChevronRight size={iconSize} className="text-gray-400" />;
       };
@@ -832,7 +877,32 @@
               <label className="cursor-pointer bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-6 rounded-lg shadow-sm transition-colors flex items-center justify-center gap-2">
                 <Upload size={20} />
                 <span>Select CSV File</span>
-                <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
+                <input type="file" accept=".csv" className="hidden" onChange={(e) => {
+                  const file = e.target.files[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = (evt) => {
+                    try {
+                      const text = evt.target.result;
+                      const parsed = parseCSV(text);
+                      if (parsed.length > 1) {
+                        const newHeaders = parsed[0];
+                        const newData = parsed.slice(1);
+                        setHeaders(newHeaders);
+                        setRawData(newData);
+                        try {
+                          sessionStorage.setItem('itAssetHeaders', JSON.stringify(newHeaders));
+                          sessionStorage.setItem('itAssetData', JSON.stringify(newData));
+                        } catch (err) {
+                          console.warn("File too large for session storage.");
+                        }
+                      }
+                    } catch (err) {
+                      alert("Failed to parse CSV file. Ensure it is a valid Snipe-IT export.");
+                    }
+                  };
+                  reader.readAsText(file);
+                }} />
               </label>
             </div>
           </div>
@@ -860,7 +930,7 @@
                   className={`px-4 py-1.5 rounded-md text-sm font-bold transition-colors flex items-center gap-1 ${activeTab==='dashboard' ? 'bg-white shadow text-blue-700' : 'text-slate-500 hover:text-slate-700'}`} 
                   onClick={() => setActiveTab('dashboard')}
                 >
-                  <LayoutDashboard size={16}/> Dashboard
+                  <Activity size={16}/> Dashboard
                 </button>
                 <button 
                   className={`px-4 py-1.5 rounded-md text-sm font-bold transition-colors flex items-center gap-1 ${activeTab==='reports' ? 'bg-white shadow text-blue-700' : 'text-slate-500 hover:text-slate-700'}`} 
@@ -914,10 +984,11 @@
               </div>
 
               {!window.__IS_EXPORTED_SNAPSHOT__ && (
-                <button onClick={handleReset} className="flex items-center gap-2 bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 px-4 py-2 rounded-lg font-medium transition-colors shadow-sm shrink-0">
+                <label className="cursor-pointer flex items-center gap-2 bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 px-4 py-2 rounded-lg font-medium transition-colors shadow-sm shrink-0">
                   <Upload size={18} />
                   <span className="hidden lg:inline">Upload New File</span>
-                </button>
+                  <input type="file" accept=".csv" className="hidden" onChange={handleFileUploadInline} />
+                </label>
               )}
 
               {!window.__IS_EXPORTED_SNAPSHOT__ && (
@@ -936,7 +1007,7 @@
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in duration-300">
                 <div className="bg-[#5C6B42] px-6 py-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                   <h2 className="text-white font-semibold text-lg flex items-center gap-2 shrink-0">
-                    <FileText size={20} className="text-blue-400"/> Reports Dashboard
+                    <FileText size={20} className="text-white"/> Reports Dashboard
                   </h2>
                   <div className="flex flex-wrap items-center gap-3">
                     <div className="flex flex-wrap items-center gap-2">
@@ -979,8 +1050,8 @@
                           <tr className="hover:bg-slate-50"><td className="px-4 py-2 font-medium">Total Assets</td>{renderCell(reportMetrics.total, () => handleReportCellClick('all', 'ALL', 'count', 'Total Assets'), 'px-4 py-2 text-right font-bold text-slate-800')}</tr>
                           <tr className="hover:bg-slate-50"><td className="px-4 py-2 font-medium">Models</td><td className="px-4 py-2 text-right font-bold text-slate-800">{reportMetrics.uniqueModels}</td></tr>
                           <tr className="hover:bg-slate-50"><td className="px-4 py-2 font-medium">Total Categories</td><td className="px-4 py-2 text-right font-bold text-slate-800">{reportMetrics.totalCategories}</td></tr>
-                          <tr className="hover:bg-slate-50"><td className="px-4 py-2 font-medium text-emerald-600">Assets (Covered by Warranty)</td>{renderCell(reportMetrics.covered, () => handleReportCellClick('all', 'ALL', 'covered', 'Covered by Warranty'), 'px-4 py-2 text-right font-bold text-emerald-600')}</tr>
-                          <tr className="hover:bg-slate-50"><td className="px-4 py-2 font-medium text-red-500">Assets (Out of Warranty)</td>{renderCell(reportMetrics.outOfWty, () => handleReportCellClick('all', 'ALL', 'outOfWty', 'Out of Warranty'), 'px-4 py-2 text-right font-bold text-red-500')}</tr>
+                          <tr className="hover:bg-slate-50"><td className="px-4 py-2 font-medium text-[#5C6B42]">Assets (Covered by Warranty)</td>{renderCell(reportMetrics.covered, () => handleReportCellClick('all', 'ALL', 'covered', 'Covered by Warranty'), 'px-4 py-2 text-right font-bold text-[#5C6B42]')}</tr>
+                          <tr className="hover:bg-slate-50"><td className="px-4 py-2 font-medium text-[#EE536B]">Assets (Out of Warranty)</td>{renderCell(reportMetrics.outOfWty, () => handleReportCellClick('all', 'ALL', 'outOfWty', 'Out of Warranty'), 'px-4 py-2 text-right font-bold text-[#EE536B]')}</tr>
                         </tbody>
                       </table>
                     </div>
@@ -1012,8 +1083,8 @@
                           <tr>
                             <th className="px-4 py-3">Category</th>
                             <th className="px-4 py-3 text-right">Count</th>
-                            <th className="px-4 py-3 text-right text-emerald-300">Covered</th>
-                            <th className="px-4 py-3 text-right text-red-300 border-r border-slate-500">Out Wty</th>
+                            <th className="px-4 py-3 text-right text-white/80">Covered</th>
+                            <th className="px-4 py-3 text-right text-red-200 border-r border-slate-500/50">Out Wty</th>
                             {showAssigned && <th className="px-4 py-3 text-right">Assigned</th>}
                             {showBrokenDeployed && <th className="px-4 py-3 text-right">Broken (Deployed)</th>}
                             {showReadyAssign && <th className="px-4 py-3 text-right">Ready for Assignment</th>}
@@ -1028,8 +1099,8 @@
                             <tr key={i} className="hover:bg-slate-50">
                               <td className="px-4 py-3 font-medium text-slate-700">{row.name}</td>
                               {renderCell(row.count, () => handleReportCellClick('category', row.name, 'count', 'Total Count'), 'px-4 py-3 text-right font-bold text-slate-800')}
-                              {renderCell(row.covered, () => handleReportCellClick('category', row.name, 'covered', 'Covered by Warranty'), 'px-4 py-3 text-right font-semibold text-emerald-600')}
-                              {renderCell(row.outOfWty, () => handleReportCellClick('category', row.name, 'outOfWty', 'Out of Warranty'), 'px-4 py-3 text-right font-semibold text-red-500 border-r border-slate-100')}
+                              {renderCell(row.covered, () => handleReportCellClick('category', row.name, 'covered', 'Covered by Warranty'), 'px-4 py-3 text-right font-semibold text-[#5C6B42]')}
+                              {renderCell(row.outOfWty, () => handleReportCellClick('category', row.name, 'outOfWty', 'Out of Warranty'), 'px-4 py-3 text-right font-semibold text-[#EE536B] border-r border-slate-100')}
                               {showAssigned && renderCell(row.assigned, () => handleReportCellClick('category', row.name, 'assigned', 'Assigned'), 'px-4 py-3 text-right text-slate-600')}
                               {showBrokenDeployed && renderCell(row.brokenDeployed, () => handleReportCellClick('category', row.name, 'brokenDeployed', 'Broken (Deployed)'), 'px-4 py-3 text-right text-slate-600')}
                               {showReadyAssign && renderCell(row.readyAssign, () => handleReportCellClick('category', row.name, 'readyAssign', 'Ready for Assignment'), 'px-4 py-3 text-right text-slate-600')}
@@ -1055,8 +1126,8 @@
                             <th className="px-4 py-3">Category</th>
                             <th className="px-4 py-3">Model</th>
                             <th className="px-4 py-3 text-right">Count</th>
-                            <th className="px-4 py-3 text-right text-emerald-300">Covered</th>
-                            <th className="px-4 py-3 text-right text-red-300 border-r border-slate-500">Out Wty</th>
+                            <th className="px-4 py-3 text-right text-white/80">Covered</th>
+                            <th className="px-4 py-3 text-right text-red-200 border-r border-slate-500/50">Out Wty</th>
                             {showAssigned && <th className="px-4 py-3 text-right">Assigned</th>}
                             {showBrokenDeployed && <th className="px-4 py-3 text-right">Broken (Deployed)</th>}
                             {showReadyAssign && <th className="px-4 py-3 text-right">Ready for Assignment</th>}
@@ -1072,8 +1143,8 @@
                               <td className="px-4 py-3 font-medium text-slate-500">{row.mainCategory}</td>
                               <td className="px-4 py-3 font-medium text-slate-700">{row.name}</td>
                               {renderCell(row.count, () => handleReportCellClick('model', row.name, 'count', 'Total Count'), 'px-4 py-3 text-right font-bold text-slate-800')}
-                              {renderCell(row.covered, () => handleReportCellClick('model', row.name, 'covered', 'Covered by Warranty'), 'px-4 py-3 text-right font-semibold text-emerald-600')}
-                              {renderCell(row.outOfWty, () => handleReportCellClick('model', row.name, 'outOfWty', 'Out of Warranty'), 'px-4 py-3 text-right font-semibold text-red-500 border-r border-slate-100')}
+                              {renderCell(row.covered, () => handleReportCellClick('model', row.name, 'covered', 'Covered by Warranty'), 'px-4 py-3 text-right font-semibold text-[#5C6B42]')}
+                              {renderCell(row.outOfWty, () => handleReportCellClick('model', row.name, 'outOfWty', 'Out of Warranty'), 'px-4 py-3 text-right font-semibold text-[#EE536B] border-r border-slate-100')}
                               {showAssigned && renderCell(row.assigned, () => handleReportCellClick('model', row.name, 'assigned', 'Assigned'), 'px-4 py-3 text-right text-slate-600')}
                               {showBrokenDeployed && renderCell(row.brokenDeployed, () => handleReportCellClick('model', row.name, 'brokenDeployed', 'Broken (Deployed)'), 'px-4 py-3 text-right text-slate-600')}
                               {showReadyAssign && renderCell(row.readyAssign, () => handleReportCellClick('model', row.name, 'readyAssign', 'Ready for Assignment'), 'px-4 py-3 text-right text-slate-600')}
@@ -1098,7 +1169,7 @@
               <section className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in duration-300">
                 <div className="bg-[#5C6B42] px-6 py-4 flex items-center justify-between">
                   <h2 className="text-white font-semibold text-lg flex items-center gap-2">
-                    <Activity size={20} className="text-blue-400"/> Current View Status
+                    <Activity size={20} className="text-white"/> Current View Status
                   </h2>
                   <div className="bg-white/10 px-4 py-1 rounded-full text-white font-mono text-sm border border-white/20">
                     Total Count: {stats.total}
@@ -1116,13 +1187,13 @@
                           <ChevronRight size={20} className={"text-blue-400 mt-1 transition-transform shrink-0 " + (expandedAssigned ? "rotate-90" : "")} />
                         </div>
                         <div className="mt-auto pt-3 text-[11px] w-full flex flex-col gap-1">
-                          <div className="flex justify-between items-center px-2 py-1 bg-[#7F915D]/10 border border-[#7F915D]/40 rounded transition-colors hover:bg-[#7F915D]/20">
-                            <span className="flex items-center gap-1 font-semibold text-[#5c6b42]"><ShieldCheck size={12}/> Covered</span> 
-                            <strong className="text-[#3b4718]">{stats["ASSIGNED_TOTAL_covered"]}</strong>
+                          <div className="flex justify-between items-center px-2 py-1 bg-[#5C6B42]/10 border border-[#5C6B42]/40 rounded transition-colors hover:bg-[#5C6B42]/20">
+                            <span className="flex items-center gap-1 font-semibold text-[#5C6B42]"><ShieldCheck size={12}/> Covered</span> 
+                            <strong className="text-slate-900">{stats["ASSIGNED_TOTAL_covered"]}</strong>
                           </div>
-                          <div className="flex justify-between items-center px-2 py-1 bg-[#DE393F]/10 border border-[#DE393F]/40 rounded transition-colors hover:bg-[#DE393F]/20">
-                            <span className="flex items-center gap-1 font-semibold text-[#a8242a]"><ShieldAlert size={12}/> Out of Wty</span> 
-                            <strong className="text-[#801419]">{stats["ASSIGNED_TOTAL"] - stats["ASSIGNED_TOTAL_covered"]}</strong>
+                          <div className="flex justify-between items-center px-2 py-1 bg-[#EE536B]/10 border border-[#EE536B]/40 rounded transition-colors hover:bg-[#EE536B]/20">
+                            <span className="flex items-center gap-1 font-semibold text-[#EE536B]"><ShieldAlert size={12}/> Out of Wty</span> 
+                            <strong className="text-slate-900">{stats["ASSIGNED_TOTAL"] - stats["ASSIGNED_TOTAL_covered"]}</strong>
                           </div>
                         </div>
                       </button>
@@ -1157,13 +1228,13 @@
                         </div>
                         <span className={"text-2xl font-bold leading-none mt-1 " + colorClasses.textDark}>{stats[statConfig.key]}</span>
                         <div className="mt-auto pt-3 text-[11px] w-full flex flex-col gap-1">
-                          <div className="flex justify-between items-center px-2 py-1 bg-[#7F915D]/10 border border-[#7F915D]/40 rounded transition-colors hover:bg-[#7F915D]/20">
-                            <span className="flex items-center gap-1 font-semibold text-[#5c6b42]"><ShieldCheck size={12}/> Covered</span> 
-                            <strong className="text-[#3b4718]">{stats[statConfig.key + "_covered"]}</strong>
+                          <div className="flex justify-between items-center px-2 py-1 bg-[#5C6B42]/10 border border-[#5C6B42]/40 rounded transition-colors hover:bg-[#5C6B42]/20">
+                            <span className="flex items-center gap-1 font-semibold text-[#5C6B42]"><ShieldCheck size={12}/> Covered</span> 
+                            <strong className="text-slate-900">{stats[statConfig.key + "_covered"]}</strong>
                           </div>
-                          <div className="flex justify-between items-center px-2 py-1 bg-[#DE393F]/10 border border-[#DE393F]/40 rounded transition-colors hover:bg-[#DE393F]/20">
-                            <span className="flex items-center gap-1 font-semibold text-[#a8242a]"><ShieldAlert size={12}/> Out of Wty</span> 
-                            <strong className="text-[#801419]">{stats[statConfig.key] - stats[statConfig.key + "_covered"]}</strong>
+                          <div className="flex justify-between items-center px-2 py-1 bg-[#EE536B]/10 border border-[#EE536B]/40 rounded transition-colors hover:bg-[#EE536B]/20">
+                            <span className="flex items-center gap-1 font-semibold text-[#EE536B]"><ShieldAlert size={12}/> Out of Wty</span> 
+                            <strong className="text-slate-900">{stats[statConfig.key] - stats[statConfig.key + "_covered"]}</strong>
                           </div>
                         </div>
                       </button>
@@ -1182,7 +1253,7 @@
                 </div>
               )}
 
-              {path.length < 4 ? (
+              {options !== null ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-in fade-in duration-300">
                   {options.map(([name, count]) => (
                     <button key={name} onClick={() => drillDown(name)} className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hover:shadow-md hover:border-blue-300 transition-all flex flex-col items-center justify-center gap-4 text-center group">
@@ -1202,7 +1273,7 @@
                     <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
                       <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                        <input type="text" placeholder="Search serial or model..." value={inventorySearch} onChange={(e) => setInventorySearch(e.target.value)} className="pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                        <input type="text" placeholder="Search name, serial or model..." value={inventorySearch} onChange={(e) => setInventorySearch(e.target.value)} className="pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                       </div>
                       <select value={inventoryStatusFilter} onChange={(e) => setInventoryStatusFilter(e.target.value)} className="px-4 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-auto">
                         <option value="ALL">All Statuses</option>
@@ -1213,21 +1284,22 @@
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
                       <thead className="bg-slate-100 text-slate-600 uppercase text-xs">
-                        <tr><th className="px-6 py-3">Serial Number</th><th className="px-6 py-3">Model</th><th className="px-6 py-3">Status</th><th className="px-6 py-3">Warranty</th></tr>
+                        <tr><th className="px-6 py-3">Asset Name</th><th className="px-6 py-3">Serial Number</th><th className="px-6 py-3">Model</th><th className="px-6 py-3">Status</th><th className="px-6 py-3">Warranty</th></tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {tableData.slice(0, 100).map((item, i) => (
                           <tr key={i} className="hover:bg-slate-50 transition-colors">
-                            <td className="px-6 py-4 font-mono font-medium">{item.originalRow[8] || "N/A"}</td>
+                            <td className="px-6 py-4 font-medium text-slate-800">{item.assetName}</td>
+                            <td className="px-6 py-4 font-mono text-slate-500">{item.originalRow[8] || "N/A"}</td>
                             <td className="px-6 py-4">{item.model}</td>
                             <td className="px-6 py-4"><span className="bg-slate-100 text-slate-800 px-2 py-1 rounded text-xs font-bold border border-slate-200">{item.assignedSubStatus || item.primaryStatus}</span></td>
                             <td className="px-6 py-4">
                               {item.isCovered ? (
-                                <span className="text-emerald-600 font-semibold flex items-center gap-1"><ShieldCheck size={14}/> Covered ({item.warrantyLimit}Y)</span>
+                                <span className="text-[#5C6B42] font-semibold flex items-center gap-1"><ShieldCheck size={14}/> Covered ({item.warrantyLimit}Y)</span>
                               ) : (
                                 <div className="flex flex-col">
-                                  <span className="text-red-500 font-semibold flex items-center gap-1"><ShieldAlert size={14}/> Out of Warranty ({item.warrantyLimit}Y)</span>
-                                  {item.isVoidedByDamage && <span className="text-[10px] text-red-400 font-bold uppercase mt-0.5 leading-tight">Voided (Broken)</span>}
+                                  <span className="text-[#EE536B] font-semibold flex items-center gap-1"><ShieldAlert size={14}/> Out of Warranty ({item.warrantyLimit}Y)</span>
+                                  {item.isVoidedByDamage && <span className="text-[10px] text-[#EE536B]/80 font-bold uppercase mt-0.5 leading-tight">Voided (Broken)</span>}
                                 </div>
                               )}
                             </td>
@@ -1261,11 +1333,9 @@
                     else if (selectedStatus === "ASSIGNED_BROKEN") { filteredForWarranty = filteredData.filter(i => i.assignedSubStatus === "BROKEN (DEPLOYED)"); } 
                     else { filteredForWarranty = filteredData.filter(i => i.primaryStatus === selectedStatus); }
 
-                    const levelIndex = path.length; let keyGetter; let breakdownLabel = "Category Breakdown";
-                    if (levelIndex === 0) { keyGetter = item => item.mainCategory; breakdownLabel = "Main Category Breakdown"; } 
-                    else if (levelIndex === 1) { keyGetter = item => item.subCategory; breakdownLabel = "Sub-Category Breakdown"; } 
-                    else if (levelIndex === 2) { keyGetter = item => item.type; breakdownLabel = "Device Type Breakdown"; } 
-                    else if (levelIndex === 3) { keyGetter = item => item.model; breakdownLabel = "Model Breakdown"; }
+                    const levelIndex = path.length; 
+                    const keyGetter = item => item.drilldownPath.length > levelIndex ? item.drilldownPath[levelIndex] : null;
+                    const breakdownLabel = levelIndex === 0 ? "Main Category Breakdown" : "Sub-Category Breakdown";
 
                     const breakdownMap = {};
                     if (keyGetter) { filteredForWarranty.forEach(item => { const key = keyGetter(item); if (key && key !== "Unknown") { breakdownMap[key] = (breakdownMap[key] || 0) + 1; } }); }
@@ -1303,45 +1373,45 @@
                         )}
                         <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mt-2 border-t border-slate-200 pt-6">Warranty & Repair Diagnostics</h3>
                         <div className="grid md:grid-cols-2 gap-6">
-                          <div className="border-2 border-emerald-200 rounded-xl overflow-hidden shadow-sm flex flex-col h-full bg-emerald-50/30">
-                            <div className="bg-emerald-100 p-4 border-b border-emerald-200 flex items-center justify-between">
-                              <h3 className="font-bold text-emerald-800 text-lg flex items-center gap-2"><ShieldCheck size={24} className="text-emerald-600"/> Condition A: Covered</h3>
-                              <span className="bg-emerald-600 text-white font-bold text-xl px-3 py-1 rounded-lg">{conditionA.length}</span>
+                          <div className="border-2 border-[#5C6B42]/20 rounded-xl overflow-hidden shadow-sm flex flex-col h-full bg-[#5C6B42]/5">
+                            <div className="bg-[#5C6B42]/10 p-4 border-b border-[#5C6B42]/20 flex items-center justify-between">
+                              <h3 className="font-bold text-[#5C6B42] text-lg flex items-center gap-2"><ShieldCheck size={24} className="text-[#5C6B42]"/> Condition A: Covered</h3>
+                              <span className="bg-[#5C6B42] text-white font-bold text-xl px-3 py-1 rounded-lg">{conditionA.length}</span>
                             </div>
                             <div className="p-5 flex-1">
-                              <p className="text-sm text-emerald-900 mb-4 bg-emerald-100/50 p-3 rounded-lg border border-emerald-200"><strong>Logic:</strong> Asset age is within its assigned warranty period (1, 2, or 3 years) from Purchase Date.</p>
+                              <p className="text-sm text-slate-800 mb-4 bg-[#5C6B42]/10 p-3 rounded-lg border border-[#5C6B42]/20"><strong>Logic:</strong> Asset age is within its assigned warranty period (1, 2, or 3 years) from Purchase Date.</p>
                               <h4 className="font-semibold text-slate-800 mb-3 uppercase text-xs tracking-wider">Action Flow: Warranty Claim</h4>
                               <div className="space-y-3">
-                                <div className="bg-white p-3 rounded-lg border border-emerald-200 shadow-sm relative overflow-hidden">
-                                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-emerald-500"></div>
+                                <div className="bg-white p-3 rounded-lg border border-[#5C6B42]/20 shadow-sm relative overflow-hidden">
+                                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#5C6B42]"></div>
                                   <div className="flex justify-between items-start mb-1">
                                     <span className="text-sm font-bold text-slate-800">EVALUATE / INVESTIGATE</span>
-                                    {evalCount > 0 && <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full">{evalCount} Devices</span>}
+                                    {evalCount > 0 && <span className="bg-[#5C6B42]/20 text-[#5C6B42] text-[10px] font-bold px-2 py-0.5 rounded-full">{evalCount} Devices</span>}
                                   </div>
                                   <p className="text-xs text-slate-600 leading-relaxed">This indicates that the device has been filed for warranty claim evaluation and is subject to vendor physical inspection or pull-out assessment.</p>
                                 </div>
-                                <div className="bg-white p-3 rounded-lg border border-emerald-200 shadow-sm relative overflow-hidden">
-                                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-teal-500"></div>
+                                <div className="bg-white p-3 rounded-lg border border-[#5C6B42]/20 shadow-sm relative overflow-hidden">
+                                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#5C6B42]"></div>
                                   <div className="flex justify-between items-start mb-1">
                                     <span className="text-sm font-bold text-slate-800">OUT FOR REPAIR</span>
-                                    {repairCount > 0 && <span className="bg-teal-100 text-teal-800 text-[10px] font-bold px-2 py-0.5 rounded-full">{repairCount} Devices</span>}
+                                    {repairCount > 0 && <span className="bg-[#5C6B42]/20 text-[#5C6B42] text-[10px] font-bold px-2 py-0.5 rounded-full">{repairCount} Devices</span>}
                                   </div>
                                   <p className="text-xs text-slate-600 leading-relaxed">This indicates that the device has already been pulled out and endorsed to the supplier/vendor for repair under warranty coverage.</p>
                                 </div>
                               </div>
                             </div>
                           </div>
-                          <div className="border-2 border-red-200 rounded-xl overflow-hidden shadow-sm flex flex-col h-full bg-red-50/30">
-                            <div className="bg-red-100 p-4 border-b border-red-200 flex items-center justify-between">
-                              <h3 className="font-bold text-red-800 text-lg flex items-center gap-2"><ShieldAlert size={24} className="text-red-600"/> Condition B: Out of Warranty</h3>
-                              <span className="bg-red-600 text-white font-bold text-xl px-3 py-1 rounded-lg">{conditionB.length}</span>
+                          <div className="border-2 border-[#EE536B]/20 rounded-xl overflow-hidden shadow-sm flex flex-col h-full bg-[#EE536B]/5">
+                            <div className="bg-[#EE536B]/10 p-4 border-b border-[#EE536B]/20 flex items-center justify-between">
+                              <h3 className="font-bold text-[#EE536B] text-lg flex items-center gap-2"><ShieldAlert size={24} className="text-[#EE536B]"/> Condition B: Out of Warranty</h3>
+                              <span className="bg-[#EE536B] text-white font-bold text-xl px-3 py-1 rounded-lg">{conditionB.length}</span>
                             </div>
                             <div className="p-5 flex-1">
-                              <p className="text-sm text-red-900 mb-4 bg-red-100/50 p-3 rounded-lg border border-red-200"><strong>Logic:</strong> Asset age exceeds its assigned warranty period OR Warranty explicitly Voided.</p>
+                              <p className="text-sm text-slate-800 mb-4 bg-[#EE536B]/10 p-3 rounded-lg border border-[#EE536B]/20"><strong>Logic:</strong> Asset age exceeds its assigned warranty period OR Warranty explicitly Voided.</p>
                               <h4 className="font-semibold text-slate-800 mb-2 uppercase text-xs tracking-wider">Action Flow:</h4>
-                              <div className="bg-white p-4 rounded-lg border border-red-200 shadow-sm mt-4 flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0"><HardDrive className="text-red-600" size={20}/></div>
-                                <span className="text-sm font-bold text-red-900">Internal Repair or Vendor Quotation Request</span>
+                              <div className="bg-white p-4 rounded-lg border border-[#EE536B]/20 shadow-sm mt-4 flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-full bg-[#EE536B]/10 flex items-center justify-center shrink-0"><HardDrive className="text-[#EE536B]" size={20}/></div>
+                                <span className="text-sm font-bold text-[#EE536B]">Internal Repair or Vendor Quotation Request</span>
                               </div>
                             </div>
                           </div>
@@ -1372,32 +1442,34 @@
                 <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-end">
                   <div className="relative w-full sm:w-64">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                    <input type="text" placeholder="Search serial or model..." value={reportDrilldownSearch} onChange={(e) => setReportDrilldownSearch(e.target.value)} className="pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <input type="text" placeholder="Search name, serial or model..." value={reportDrilldownSearch} onChange={(e) => setReportDrilldownSearch(e.target.value)} className="pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                 </div>
 
                 <div className="p-0 overflow-x-auto overflow-y-auto flex-1 bg-white">
                   <table className="w-full text-sm text-left">
                     <thead className="bg-slate-100 text-slate-600 uppercase text-xs sticky top-0 z-10">
-                      <tr><th className="px-6 py-3">Serial Number</th><th className="px-6 py-3">Model</th><th className="px-6 py-3">Status</th><th className="px-6 py-3">Warranty</th></tr>
+                      <tr><th className="px-6 py-3">Asset Name</th><th className="px-6 py-3">Serial Number</th><th className="px-6 py-3">Model</th><th className="px-6 py-3">Status</th><th className="px-6 py-3">Warranty</th></tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {reportDrilldown.data.filter(item => {
                         return reportDrilldownSearch === '' || 
                           (String(item.originalRow[8] || '')).toLowerCase().includes(reportDrilldownSearch.toLowerCase()) ||
-                          String(item.model || '').toLowerCase().includes(reportDrilldownSearch.toLowerCase());
+                          String(item.model || '').toLowerCase().includes(reportDrilldownSearch.toLowerCase()) ||
+                          String(item.assetName || '').toLowerCase().includes(reportDrilldownSearch.toLowerCase());
                       }).slice(0, 500).map((item, i) => (
                         <tr key={i} className="hover:bg-slate-50 transition-colors">
-                          <td className="px-6 py-4 font-mono font-medium">{item.originalRow[8] || "N/A"}</td>
+                          <td className="px-6 py-4 font-medium text-slate-800">{item.assetName}</td>
+                          <td className="px-6 py-4 font-mono text-slate-500">{item.originalRow[8] || "N/A"}</td>
                           <td className="px-6 py-4">{item.model}</td>
                           <td className="px-6 py-4"><span className="bg-slate-100 text-slate-800 px-2 py-1 rounded text-xs font-bold border border-slate-200">{item.assignedSubStatus || item.primaryStatus}</span></td>
                           <td className="px-6 py-4">
                             {item.isCovered ? (
-                              <span className="text-emerald-600 font-semibold flex items-center gap-1"><ShieldCheck size={14}/> Covered ({item.warrantyLimit}Y)</span>
+                              <span className="text-[#5C6B42] font-semibold flex items-center gap-1"><ShieldCheck size={14}/> Covered ({item.warrantyLimit}Y)</span>
                             ) : (
                               <div className="flex flex-col">
-                                <span className="text-red-500 font-semibold flex items-center gap-1"><ShieldAlert size={14}/> Out of Warranty ({item.warrantyLimit}Y)</span>
-                                {item.isVoidedByDamage && <span className="text-[10px] text-red-400 font-bold uppercase mt-0.5 leading-tight">Voided (Broken)</span>}
+                                <span className="text-[#EE536B] font-semibold flex items-center gap-1"><ShieldAlert size={14}/> Out of Warranty ({item.warrantyLimit}Y)</span>
+                                {item.isVoidedByDamage && <span className="text-[10px] text-[#EE536B]/80 font-bold uppercase mt-0.5 leading-tight">Voided (Broken)</span>}
                               </div>
                             )}
                           </td>
